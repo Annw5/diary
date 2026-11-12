@@ -13,7 +13,9 @@ body{background:radial-gradient(circle at 20% 10%,rgba(120,160,255,.25),transpar
 #themes{position:fixed;top:12px;right:16px;z-index:2}            /* кнопки тем: правый верхний угол */
 #themes button{all:unset;cursor:pointer;font-size:22px;padding:0 6px;opacity:.35} /* без рамок, бледные */
 #themes button.on{opacity:1}                                      /* выбранная тема - ярче */
-#lock{text-align:center;margin-top:12vh}                          /* блок пароля: сверху по центру */
+#lock{text-align:center;margin-top:ьфч12vh}                          /* блок пароля: сверху по центру */
+/* Подсказка: сверху слева, мелкая, полупрозрачная, не мешает кликам */
+#info{position:fixed;top:12px;left:16px;right:90px;z-index:1;font-size:12px;line-height:1.4;opacity:.5;pointer-events:none}
 #pw{all:unset;field-sizing:content;min-width:1px;color:inherit}   /* поле без рамки, растёт по мере ввода */
 #us{animation:b 1s steps(1) infinite}                             /* подчёркивание мигает */
 @keyframes b{50%{opacity:0}}                                      /* в половине цикла - невидимо */
@@ -24,6 +26,15 @@ body{background:radial-gradient(circle at 20% 10%,rgba(120,160,255,.25),transpar
 #num{position:fixed;bottom:10px;width:100%;text-align:center;opacity:.35;font-size:14px;pointer-events:none}
 </style>
 
+<div id="info">
+Дневник хранится в одном файле diary2.bin внутри браузера, только на этом устройстве, и работает без интернета.
+Пароль превращается в ключ шифрования: без него файл не прочитать, а восстановить пароль нельзя.
+В пустой дневник пускает любой пароль, он и станет твоим.
+В записи можно писать текст и добавлять фото (перетащи на страницу, они сохраняются как WebP).
+Оформление: HTML/CSS между &lt;&lt;&lt; и &gt;&gt;&gt; действует на эту и следующие записи, пока не встретится новый код.
+Листать записи: свайп или Alt+←/→, свайп влево с последней записи создаёт новую. Сохраняется само.
+Видео и другие файлы пока не поддерживаются.
+</div>
 <div id="themes"><button id="dk">☾</button><button id="lt">☼</button></div>
 <div id="lock"><span id="lab">пароль</span> <input id="pw" type="password" autofocus><span id="us">_</span></div>
 <div id="page"><div id="deco"></div><div id="t" contenteditable></div><div id="pics"></div></div>
@@ -164,6 +175,7 @@ $('pw').onkeydown = async e => {
   try { if (idx.length) await show(idx.length - 1); else draw(); }
   catch { key = null; $('pw').value = ''; $('lab').textContent = 'неверно'; setTimeout(() => $('lab').textContent = 'пароль', 1200); return; }
   $('lock').style.display = 'none';
+  $('info').style.display = 'none';   // после входа подсказка больше не нужна
   $('page').style.display = 'block';
 };
 
