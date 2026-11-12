@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<input id="pw" type="password" placeholder="Пароль"> <!-- поле пароля: из него делается ключ шифрования -->
+<button id="open">Открыть</button>
+<button id="saveBtn">Сохранить</button>
+<br><textarea id="t" rows="15" cols="40"></textarea> <!-- сам дневник -->
+<script>
+const enc = new TextEncoder(), dec = new TextDecoder(); // текст <-> байты
+const $ = id => document.getElementById(id);            // короткий поиск элемента
+
+// Из пароля и "соли" делаем ключ AES
+async function key(pw, salt) {
+  const base = await crypto.subtle.importKey('raw', enc.encode(pw), 'PBKDF2', false, ['deriveKey']); // пароль как сырой материал
+  return crypto.subtle.deriveKey(
+    {name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256'}, // 100000 повторов: усложняет подбор пароля
+    base, {name: 'AES-GCM', length: 256}, false, ['encrypt', 'decrypt']);
+}
+
+// Пропускает байты через поток сжатия или распаковки
+async function pipe(data, stream) {
+  return new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(stream)).arrayBuffer());
+}
+
+// Сохранение: сжать -> зашифровать -> записать в файл
+async function save(pw, text) {
+  const salt = crypto.getRandomValues(new Uint8Array(16)); // случайная соль (16 байт)
+  const iv = crypto.getRandomValues(new Uint8Array(12));   // случайный вектор для AES (12 байт)
+  const packed = await pipe(enc.encode(text), new CompressionStream('gzip')); // сжимаем, чтобы файл был мал
+  const cipher = await crypto.subtle.encrypt({name: 'AES-GCM', iv}, await key(pw, salt), packed); // шифруем
+  const root = await navigator.storage.getDirectory();     // корневая папка приватного хранилища
+  const f = await root.getFileHandle('diary.bin', {create: true}); // файл (создастся, если нет)
+  const w = await f.createWritable();                      // открываем на запись
+  await w.write(new Blob([salt, iv, cipher]));             // пишем: соль + iv + данные
+  await w.close();                                         // закрываем, иначе не сохранится
+}
+
+// Чтение: файл -> расшифровать -> распаковать
+async function load(pw) {
+  const root = await navigator.storage.getDirectory();
+  let f;
+  try { f = await root.getFileHandle('diary.bin'); } catch { return ''; } // файла нет -> пустой дневник
+  const b = new Uint8Array(await (await f.getFile()).arrayBuffer()); // читаем все байты
+  const packed = await crypto.subtle.decrypt(              // при неверном пароле тут будет ошибка
+    {name: 'AES-GCM', iv: b.slice(16, 28)},                // iv лежит в байтах 16..28
+    await key(pw, b.slice(0, 16)),                         // соль в байтах 0..16
+    b.slice(28));                                          // остальное - зашифрованные данные
+  return dec.decode(await pipe(new Uint8Array(packed), new DecompressionStream('gzip'))); // распаковка
+}
+
+$('open').onclick = async () => {
+  try { $('t').value = await load($('pw').value); } // показываем текст
+  catch { alert('Неверный пароль'); }
+};
+$('saveBtn').onclick = () => save($('pw').value, $('t').value); // сохраняем по кнопке
+
+navigator.storage.persist();                  // просим браузер не удалять данные самому
+navigator.serviceWorker.register('sw.js');    // подключаем офлайн-режим
+</script>
