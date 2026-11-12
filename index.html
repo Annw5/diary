@@ -1,58 +1,106 @@
 <!DOCTYPE html>
 <meta charset="utf-8">
-<input id="pw" type="password" placeholder="Пароль"> <!-- поле пароля: из него делается ключ шифрования -->
-<button id="open">Открыть</button>
-<button id="saveBtn">Сохранить</button>
-<br><textarea id="t" rows="15" cols="40"></textarea> <!-- сам дневник -->
+<input id="pw" type="password" placeholder="Пароль"><button id="open">Открыть</button><br>
+<button id="prev">←</button> <span id="num"></span> <button id="next">→</button>
+<button id="add">Новая запись</button><br>
+<textarea id="t" rows="10" cols="40"></textarea><br>
+<input id="ph" type="file" accept="image/*" multiple> <button id="save">Сохранить</button>
+<div id="pics"></div>
 <script>
-const enc = new TextEncoder(), dec = new TextDecoder(); // текст <-> байты
-const $ = id => document.getElementById(id);            // короткий поиск элемента
+const enc = new TextEncoder(), dec = new TextDecoder();   // текст <-> байты
+const $ = id => document.getElementById(id);              // короткий поиск элемента
+const u32 = n => new Uint8Array(new Uint32Array([n]).buffer); // число -> 4 байта (это и есть метка)
+let key, salt, file, handle;  // ключ шифрования, соль, файл дневника
+let idx = [];                 // список записей: где каждая начинается (s) и её длина (n)
+let cur = 0, photos = [];     // номер текущей записи и её фото
 
-// Из пароля и "соли" делаем ключ AES
-async function key(pw, salt) {
-  const base = await crypto.subtle.importKey('raw', enc.encode(pw), 'PBKDF2', false, ['deriveKey']); // пароль как сырой материал
-  return crypto.subtle.deriveKey(
-    {name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256'}, // 100000 повторов: усложняет подбор пароля
-    base, {name: 'AES-GCM', length: 256}, false, ['encrypt', 'decrypt']);
+// Из пароля и соли делаем ключ шифрования
+async function makeKey(pw, salt) {
+  const base = await crypto.subtle.importKey('raw', enc.encode(pw), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({name:'PBKDF2', salt, iterations:100000, hash:'SHA-256'},
+    base, {name:'AES-GCM', length:256}, false, ['encrypt','decrypt']);
 }
 
-// Пропускает байты через поток сжатия или распаковки
-async function pipe(data, stream) {
-  return new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(stream)).arrayBuffer());
+// Записывает файл целиком из кусочков (parts)
+async function write(parts) {
+  const w = await handle.createWritable();    // открываем файл на запись
+  await w.write(new Blob(parts));             // склеиваем кусочки и пишем
+  await w.close();                            // без закрытия ничего не сохранится
+  file = await handle.getFile();              // перечитываем свежий файл
 }
 
-// Сохранение: сжать -> зашифровать -> записать в файл
-async function save(pw, text) {
-  const salt = crypto.getRandomValues(new Uint8Array(16)); // случайная соль (16 байт)
-  const iv = crypto.getRandomValues(new Uint8Array(12));   // случайный вектор для AES (12 байт)
-  const packed = await pipe(enc.encode(text), new CompressionStream('gzip')); // сжимаем, чтобы файл был мал
-  const cipher = await crypto.subtle.encrypt({name: 'AES-GCM', iv}, await key(pw, salt), packed); // шифруем
-  const root = await navigator.storage.getDirectory();     // корневая папка приватного хранилища
-  const f = await root.getFileHandle('diary.bin', {create: true}); // файл (создастся, если нет)
-  const w = await f.createWritable();                      // открываем на запись
-  await w.write(new Blob([salt, iv, cipher]));             // пишем: соль + iv + данные
-  await w.close();                                         // закрываем, иначе не сохранится
+// Идём по файлу меткам и запоминаем, где какая запись (саму запись НЕ читаем)
+async function scan() {
+  idx = []; let pos = 16;                     // первые 16 байт - соль, записи после неё
+  while (pos < file.size) {
+    const head = await file.slice(pos, pos + 4).arrayBuffer();  // читаем только метку (4 байта)
+    const n = new DataView(head).getUint32(0, true);            // метка -> длина записи
+    idx.push({s: pos + 4, n});                                  // запоминаем начало и длину
+    pos += 4 + n;                                               // прыгаем к следующей метке
+  }
 }
 
-// Чтение: файл -> расшифровать -> распаковать
-async function load(pw) {
-  const root = await navigator.storage.getDirectory();
-  let f;
-  try { f = await root.getFileHandle('diary.bin'); } catch { return ''; } // файла нет -> пустой дневник
-  const b = new Uint8Array(await (await f.getFile()).arrayBuffer()); // читаем все байты
-  const packed = await crypto.subtle.decrypt(              // при неверном пароле тут будет ошибка
-    {name: 'AES-GCM', iv: b.slice(16, 28)},                // iv лежит в байтах 16..28
-    await key(pw, b.slice(0, 16)),                         // соль в байтах 0..16
-    b.slice(28));                                          // остальное - зашифрованные данные
-  return dec.decode(await pipe(new Uint8Array(packed), new DecompressionStream('gzip'))); // распаковка
+// Показываем запись номер i: достаём из файла только её
+async function show(i) {
+  cur = Math.max(i, 0); photos = [];
+  $('t').value = '';
+  if (i >= 0 && i < idx.length) {
+    const {s, n} = idx[i];
+    const block = new Uint8Array(await file.slice(s, s + n).arrayBuffer()); // читаем ТОЛЬКО эту запись
+    const plain = await crypto.subtle.decrypt({name:'AES-GCM', iv: block.slice(0,12)}, key, block.slice(12)); // расшифровка
+    const jl = new DataView(plain).getUint32(0, true);          // длина служебной строки
+    const meta = JSON.parse(dec.decode(plain.slice(4, 4 + jl))); // t - текст, p - размеры фото
+    $('t').value = meta.t;
+    let pos = 4 + jl;                                           // дальше идут фото подряд
+    for (const size of meta.p) { photos.push(new Blob([plain.slice(pos, pos + size)], {type:'image/webp'})); pos += size; }
+  }
+  draw();
+}
+
+// Рисуем номер записи и её фото
+function draw() {
+  $('num').textContent = (cur + 1) + ' / ' + Math.max(idx.length, cur + 1);
+  $('pics').innerHTML = '';
+  photos.forEach(b => { const im = new Image(); im.src = URL.createObjectURL(b); im.width = 200; $('pics').append(im); });
 }
 
 $('open').onclick = async () => {
-  try { $('t').value = await load($('pw').value); } // показываем текст
-  catch { alert('Неверный пароль'); }
+  const root = await navigator.storage.getDirectory();                       // скрытая папка браузера
+  handle = await root.getFileHandle('diary.bin', {create: true});            // файл дневника
+  file = await handle.getFile();
+  if (file.size == 0) { salt = crypto.getRandomValues(new Uint8Array(16)); await write([salt]); } // новый дневник: делаем соль
+  else salt = new Uint8Array(await file.slice(0, 16).arrayBuffer());         // старый: читаем соль
+  key = await makeKey($('pw').value, salt);
+  await scan();
+  try { await show(idx.length - 1); } catch { alert('Неверный пароль'); }    // открываем последнюю запись
 };
-$('saveBtn').onclick = () => save($('pw').value, $('t').value); // сохраняем по кнопке
 
-navigator.storage.persist();                  // просим браузер не удалять данные самому
-navigator.serviceWorker.register('sw.js');    // подключаем офлайн-режим
+$('save').onclick = async () => {
+  const json = enc.encode(JSON.stringify({t: $('t').value, p: photos.map(b => b.size)})); // текст + размеры фото
+  const plain = await new Blob([u32(json.length), json, ...photos]).arrayBuffer();         // всё в одну запись
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, plain);                 // шифруем
+  const block = new Blob([u32(12 + ct.byteLength), iv, ct]);                                // метка + запись
+  const parts = [salt];
+  idx.forEach((e, k) => parts.push(k == cur ? block : file.slice(e.s - 4, e.s + e.n)));     // чужие записи копируем как есть
+  if (cur >= idx.length) parts.push(block);                                                  // новая запись - в конец
+  await write(parts); await scan();
+};
+
+$('ph').onchange = async e => {
+  for (const f of e.target.files) {
+    const bmp = await createImageBitmap(f);                                  // читаем картинку
+    const c = new OffscreenCanvas(bmp.width, bmp.height);                    // невидимый холст
+    c.getContext('2d').drawImage(bmp, 0, 0);                                 // рисуем на нём
+    photos.push(await c.convertToBlob({type:'image/webp', quality:0.9}));    // сохраняем как WebP
+  }
+  draw();
+};
+
+$('prev').onclick = () => cur > 0 && show(cur - 1);                  // назад
+$('next').onclick = () => cur < idx.length - 1 && show(cur + 1);     // вперёд
+$('add').onclick = () => { cur = idx.length; photos = []; $('t').value = ''; draw(); }; // пустая новая запись
+
+navigator.storage.persist();
+navigator.serviceWorker.register('sw.js');
 </script>
