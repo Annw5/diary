@@ -1,29 +1,11 @@
 <!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<style>
-:root{--bg:#fff;--fg:#000}                       /* светлая тема */
-[data-theme=dark]{--bg:#000;--fg:#fff}           /* тёмная тема */
-body{margin:0;background:var(--bg);color:var(--fg);font:16px ui-monospace,Menlo,Consolas,monospace}
-#th{all:unset;position:fixed;top:8px;right:12px;z-index:9;font-size:22px;cursor:pointer}
-#info{padding:12px 48px 0 16px;font-size:12px;line-height:1.4;opacity:.5}
-#lock{margin:8vh 0 0;padding:8px 0;text-align:center;position:sticky;top:0;background:var(--bg);z-index:1;cursor:text}
-#pw{position:absolute;opacity:0;width:1px;height:1px;padding:0;border:0}  /* настоящее поле невидимо: ввод рисуем сами */
-#pa,#pb{white-space:pre}
-#us{display:inline-block;width:0;overflow:visible;animation:b 1s steps(1) infinite} /* курсор _ : не занимает места, мигает */
-#pw:not(:focus)~#us{animation:none;opacity:.4}   /* если ввод не здесь, _ тусклый и не мигает */
-@keyframes b{50%{opacity:0}}
-#page{display:none;padding:16px 8vw 40px}
-#t{outline:none;min-height:70vh;caret-shape:underscore}
-#t img{max-width:200px;margin:4px}
-table{border-collapse:collapse;margin:8px 0}
-td{border:1px solid;padding:2px 8px;min-width:3ch}
-.box{border:1px solid;padding:8px;margin:8px 0}
-hr{border:0;border-top:1px solid}
-#num{position:fixed;bottom:8px;width:100%;text-align:center;opacity:.4;font-size:14px;pointer-events:none}
-</style>
+<link rel="stylesheet" href="style.css">
 
 <button id="th">☾</button>
+
+<!-- Подсказка до входа (после входа заменяется списком команд) -->
 <div id="info">
 Дневник хранится в одном файле diary3.bin внутри браузера, только на этом устройстве, и работает без интернета.
 Пароль превращается в ключ шифрования: без него файл не прочитать, а восстановить пароль нельзя.
@@ -32,199 +14,18 @@ hr{border:0;border-top:1px solid}
 Оформление: HTML/CSS между &lt;&lt;&lt; и &gt;&gt;&gt; действует на эту и следующие записи, пока не встретится новый код.
 Видео и другие файлы пока не поддерживаются.
 </div>
-<form id="lock"><span id="lab">пароль</span> <input id="pw" autofocus autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="go"><span id="pa"></span><span id="us">_</span><span id="pb"></span></form>
+
+<!-- Строка пароля, потом команд. Настоящее поле невидимо, текст и курсор _ рисует terminal.js -->
+<form id="lock">
+  <span id="lab">пароль</span>
+  <input id="pw" autofocus autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="go">
+  <span id="pa"></span><span id="us">_</span><span id="pb"></span>
+  <div id="hints"></div>
+</form>
+
+<!-- Дневник: deco - оформление из кода, t - сама запись -->
 <div id="page"><div id="deco"></div><div id="t" contenteditable></div></div>
 <div id="num"></div>
 
-<script>
-onerror = m => alert(m);                         // если что-то сломается, появится окно с текстом ошибки
-onunhandledrejection = e => alert(e.reason);
-const $ = id => document.getElementById(id), enc = new TextEncoder(), dec = new TextDecoder();
-const u32 = n => new Uint8Array(new Uint32Array([n]).buffer);   // число -> 4 байта (метка длины)
-let key, salt, file, handle, idx = [], cur = 0, photos = [], dirty, timer, memo = {}, last = '', rg;
-// idx - записи, cur - номер текущей, photos - фото текущей записи, dirty - есть несохранённое,
-// memo - кэш кода, last - показанный код, rg - место в записи, куда вставлять элементы
-
-// ---------- Тема ----------
-const th = m => { document.documentElement.dataset.theme = m; $('th').textContent = m == 'dark' ? '☾' : '☼'; localStorage.theme = m; };
-th(localStorage.theme || (matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light'));
-$('th').onclick = () => th(document.documentElement.dataset.theme == 'dark' ? 'light' : 'dark');
-
-// ---------- Строка ввода: настоящее поле невидимо, а мы рисуем текст и мигающий _ там, где стоит курсор ----------
-function sync() {
-  const p = $('pw'), v = key ? p.value : '•'.repeat(p.value.length), i = p.selectionStart;  // до входа показываем точки
-  $('pa').textContent = v.slice(0, i);   // текст до курсора
-  $('pb').textContent = v.slice(i);      // текст после курсора
-}
-for (const ev of ['input', 'keyup', 'click', 'focus', 'select']) $('pw').addEventListener(ev, sync);
-
-// ---------- Файл: [соль 16][метка 4][флаг 1][iv 12][данные] ... ----------
-const makeKey = async (pw, salt) => crypto.subtle.deriveKey(
-  {name:'PBKDF2', salt, iterations:100000, hash:'SHA-256'},
-  await crypto.subtle.importKey('raw', enc.encode(pw), 'PBKDF2', false, ['deriveKey']),
-  {name:'AES-GCM', length:256}, false, ['encrypt','decrypt']);
-
-async function write(parts) {
-  const w = await handle.createWritable();
-  await w.write(new Blob(parts)); await w.close();
-  file = await handle.getFile();
-}
-async function scan() {                              // идём по меткам, запоминаем записи (сами не читаем)
-  idx = []; memo = {};
-  for (let pos = 16; pos < file.size;) {
-    const h = new Uint8Array(await file.slice(pos, pos + 5).arrayBuffer());
-    const n = new DataView(h.buffer).getUint32(0, true);
-    idx.push({s: pos + 4, n, f: h[4]});             // f = 1: в записи есть код оформления
-    pos += 4 + n;
-  }
-}
-async function open(i) {                             // расшифровываем запись i
-  const {s, n} = idx[i];
-  const b = new Uint8Array(await file.slice(s + 1, s + n).arrayBuffer());
-  const plain = await crypto.subtle.decrypt({name:'AES-GCM', iv: b.slice(0, 12)}, key, b.slice(12));
-  const jl = new DataView(plain).getUint32(0, true);
-  const meta = JSON.parse(dec.decode(plain.slice(4, 4 + jl)));   // h - содержимое, c - код оформления, p - размеры фото
-  let pos = 4 + jl;
-  return {h: meta.h, c: meta.c, p: meta.p.map(size => new Blob([plain.slice(pos, pos += size)], {type:'image/webp'}))};
-}
-
-// ---------- Оформление ----------
-const getCode = text => (text.match(/<<<([\s\S]*?)>>>/g) || []).map(m => m.slice(3, -3)).join('\n');
-async function deco() {                              // свой код записи, иначе от ближайшей предыдущей с кодом
-  let c = getCode($('t').innerText);
-  for (let k = cur - 1; !c && k >= 0; k--) if (idx[k].f) c = memo[k] ??= (await open(k)).c;
-  if (c !== last) $('deco').innerHTML = last = c || '';
-}
-
-// ---------- Показ ----------
-function draw() { $('num').textContent = (cur + 1) + ' / ' + Math.max(idx.length, cur + 1); deco(); }
-async function show(i) {
-  const e = await open(i);
-  cur = i; photos = e.p; rg = null; $('t').innerHTML = e.h;
-  $('t').querySelectorAll('img[data-i]').forEach(im => im.src = URL.createObjectURL(photos[im.dataset.i])); // возвращаем фото на места
-  draw();
-}
-
-// ---------- Сохранение ----------
-async function save() {
-  const t = $('t');
-  if (!t.innerText.trim() && !t.querySelector('img,table,hr,input')) return;   // пустое не сохраняем
-  const imgs = [...t.querySelectorAll('img[data-i]')];
-  photos = imgs.map(im => photos[im.dataset.i]);     // оставляем только фото, которые ещё есть в записи
-  imgs.forEach((im, k) => im.dataset.i = k);         // и нумеруем заново
-  const box = t.cloneNode(true);
-  box.querySelectorAll('img').forEach(im => im.removeAttribute('src'));        // ссылки не храним: фото лежат отдельно
-  const c = getCode(t.innerText);
-  const json = enc.encode(JSON.stringify({h: box.innerHTML, c, p: photos.map(b => b.size)}));
-  const plain = await new Blob([u32(json.length), json, ...photos]).arrayBuffer();
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ct = await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, plain);
-  const block = new Blob([u32(13 + ct.byteLength), Uint8Array.of(c ? 1 : 0), iv, ct]);
-  const parts = [salt, ...idx.map((e, k) => k == cur ? block : file.slice(e.s - 4, e.s + e.n))];
-  if (cur >= idx.length) parts.push(block);
-  await write(parts); await scan(); dirty = false;
-}
-function changed() { dirty = true; clearTimeout(timer); timer = setTimeout(save, 1500); deco(); }
-$('t').oninput = changed;
-$('t').onclick = e => { if (e.target.type == 'checkbox') { e.target.toggleAttribute('checked', e.target.checked); changed(); } }; // запоминаем галочки
-
-// ---------- Куда ставить курсор и вставка элементов ----------
-document.onselectionchange = () => {
-  sync();
-  const s = getSelection();                          // запоминаем, где стоял курсор в записи
-  if (s.rangeCount && $('t').contains(s.anchorNode)) rg = s.getRangeAt(0).cloneRange();
-};
-function edit(el) {                                  // переносим ввод в запись: в el, иначе где был курсор, иначе в конец
-  $('t').focus();
-  const s = getSelection();
-  if (el) return s.selectAllChildren(el);
-  s.removeAllRanges();
-  if (rg) s.addRange(rg); else { s.selectAllChildren($('t')); s.collapseToEnd(); }
-}
-function ins(x) {                                    // вставляем HTML-строку или элемент
-  const f = typeof x == 'string' ? document.createRange().createContextualFragment(x) : x;
-  const el = (f.firstChild || f).querySelector?.('td,li,.box,h2');   // куда поставить курсор: первая ячейка/пункт/поле
-  if (rg) { rg.collapse(false); rg.insertNode(f); rg.collapse(false); } else $('t').append(f);
-  changed(); edit(el);
-}
-async function addPhotos(files) {                    // фото -> WebP -> в запись
-  for (const f of files) {
-    if (!f.type.startsWith('image/')) continue;
-    const bmp = await createImageBitmap(f), c = new OffscreenCanvas(bmp.width, bmp.height);
-    c.getContext('2d').drawImage(bmp, 0, 0);
-    const b = await c.convertToBlob({type:'image/webp', quality:0.9}), im = new Image();
-    im.src = URL.createObjectURL(b); im.dataset.i = photos.push(b) - 1;   // data-i - номер фото в списке
-    ins(im);
-  }
-}
-const end = '<div><br></div>';                       // пустая строка после элемента, чтобы можно было писать дальше
-const cmds = {                                       // команды: слово -> что вставить
-  фото: () => { const i = document.createElement('input'); i.type = 'file'; i.accept = 'image/*'; i.multiple = true; i.onchange = () => addPhotos(i.files); i.click(); },
-  таблица: (c = 3, r = 3) => ins('<table>' + ('<tr>' + '<td>&nbsp;</td>'.repeat(Math.min(+c, 20)) + '</tr>').repeat(Math.min(+r, 50)) + '</table>' + end),
-  календарь: (m, y) => {                             // месяц и год можно не указывать: возьмётся текущий
-    const n = new Date(), d = new Date(+y || n.getFullYear(), m ? m - 1 : n.getMonth(), 1);
-    const cells = [...Array((d.getDay() + 6) % 7).fill(''),                                           // пустые клетки до 1-го числа (неделя с понедельника)
-      ...Array.from({length: new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()}, (_, i) => i + 1)]; // числа месяца
-    while (cells.length % 7) cells.push('');         // добиваем последнюю неделю
-    let rows = '';
-    for (let i = 0; i < cells.length; i += 7) rows += '<tr>' + cells.slice(i, i + 7).map(c => `<td>${c || '&nbsp;'}</td>`).join('') + '</tr>';
-    ins(`<table><tr><td colspan=7>${d.toLocaleString('ru', {month:'long', year:'numeric'})}</td></tr><tr>${'Пн Вт Ср Чт Пт Сб Вс'.split(' ').map(x => `<td>${x}</td>`).join('')}</tr>${rows}</table>` + end);
-  },
-  список: () => ins('<ul><li>&nbsp;</li></ul>'),
-  чек: () => ins('<div><input type="checkbox"> &nbsp;</div>'),
-  поле: () => ins('<div class="box"><br></div>' + end),
-  заголовок: () => ins('<h2>Заголовок</h2>' + end),
-  линия: () => ins('<hr>'),
-  дата: () => ins(new Date().toLocaleDateString('ru')),
-  тема: () => $('th').click(),
-  новая: () => go(idx.length), назад: () => go(cur - 1), вперёд: () => go(cur + 1)
-};
-function run() {                                     // разбираем строку: слово + числа после него
-  const [c, ...a] = $('pw').value.trim().toLowerCase().split(/\s+/);
-  $('pw').value = ''; sync();
-  cmds[c] ? cmds[c](...a) : c && flash('нет такой команды');
-}
-const flash = m => { $('lab').textContent = m; setTimeout(() => $('lab').textContent = key ? 'команда' : 'пароль', 1200); };
-
-// ---------- Переходы и клавиши ----------
-async function go(i) {
-  if (!key || i < 0) return;
-  clearTimeout(timer); if (dirty) await save();
-  if (i < idx.length) await show(i);
-  else if (cur < idx.length) { cur = idx.length; photos = []; rg = null; $('t').innerHTML = ''; draw(); } // новая пустая запись
-}
-document.onkeydown = e => {
-  if (e.key == 'Escape') $('pw').focus();            // Esc - в строку команд
-  else if (e.altKey && /Arrow[LR]/.test(e.key)) go(cur + (e.key == 'ArrowRight' ? 1 : -1)); // Alt+стрелки - листать записи
-};
-$('t').onkeydown = e => { if (e.key == 'Tab') { e.preventDefault(); $('pw').focus(); } };            // Tab в записи - к командам
-$('pw').onkeydown = e => { if (key && (e.key == 'Tab' || e.key == 'ArrowDown')) { e.preventDefault(); edit(); } }; // Tab или ↓ - писать в запись
-let x0; document.ontouchstart = e => x0 = e.touches[0].clientX;
-document.ontouchend = e => { const d = e.changedTouches[0].clientX - x0; if (Math.abs(d) > 100) go(cur + (d < 0 ? 1 : -1)); };
-document.ondragover = e => e.preventDefault();       // фото можно перетащить на страницу
-document.ondrop = e => { e.preventDefault(); addPhotos(e.dataTransfer.files); };
-
-// ---------- Вход ----------
-async function login() {
-  handle = await (await navigator.storage.getDirectory()).getFileHandle('diary3.bin', {create: true});
-  file = await handle.getFile();
-  if (file.size) salt = new Uint8Array(await file.slice(0, 16).arrayBuffer());
-  else await write([salt = crypto.getRandomValues(new Uint8Array(16))]);
-  key = await makeKey($('pw').value, salt);
-  await scan();
-  try { idx.length ? await show(idx.length - 1) : draw(); }
-  catch { key = null; $('pw').value = ''; sync(); return flash('неверно'); }
-  $('pw').value = ''; sync(); $('lab').textContent = 'команда';  // строка пароля становится строкой команд
-  $('lock').style.marginTop = 0;
-  $('info').textContent = 'Команды: фото · таблица [столбцы строки] · календарь [месяц год] · список · чек · поле · заголовок · линия · дата · тема · новая · назад · вперёд. Enter - выполнить, Tab или ↓ - писать в запись, Tab или Esc - обратно к командам, Alt+←/→ - листать записи.';
-  $('page').style.display = 'block';
-}
-$('lock').onsubmit = e => { e.preventDefault(); key ? run() : login(); };  // Enter (и кнопка "Ввод" на экранной клавиатуре)
-document.body.onclick = () => !key && $('pw').focus();   // до входа клик в любом месте = ввод пароля
-$('lock').onclick = () => $('pw').focus();               // после входа - клик по строке команд
-$('page').onclick = e => e.target == $('page') && edit();   // клик по свободному месту - писать в запись
-sync();
-
-navigator.storage.persist();
-navigator.serviceWorker.register('sw.js');
-</script>
+<script src="js/debug.js"></script>
+<script type="module" src="js/main.js"></script>
