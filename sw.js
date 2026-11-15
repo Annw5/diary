@@ -1,6 +1,6 @@
-// При установке кладём страницу в кэш (v3 - новая версия)
+// При установке кладём страницу в кэш 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open('v3').then(c => c.addAll(['./', './index.html'])));
+  e.waitUntil(caches.open('v6').then(c => c.addAll(['./', './index.html'])));
   self.skipWaiting();                               // не ждём закрытия старых вкладок
 });
 // При запуске удаляем все старые кэши, кроме v3
