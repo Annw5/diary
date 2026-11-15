@@ -2,30 +2,22 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-/* Светлая тема: чёрное на белом */
-:root{--bg:#fff;--fg:#000;--glass:rgba(255,255,255,.7)}
-/* Тёмная тема: белое на чёрном */
-[data-theme=dark]{--bg:#000;--fg:#fff;--glass:rgba(0,0,0,.7)}
-html,body{margin:0;height:100%}
-/* Фон однотонный, шрифт моноширинный, как в терминале */
-body{background:var(--bg);color:var(--fg);font:16px ui-monospace,Menlo,Consolas,monospace;transition:.3s}
-  color:var(--fg);font:18px system-ui,sans-serif;transition:.3s}
-#themes{position:fixed;top:12px;right:16px;z-index:2}            /* кнопки тем: правый верхний угол */
-#themes button{all:unset;cursor:pointer;font-size:22px;padding:0 6px;opacity:.35} /* без рамок, бледные */
-#themes button.on{opacity:1}                                      /* выбранная тема - ярче */
-#lock{text-align:center;margin-top:max(12vh,170px)}                          /* блок пароля: сверху по центру */
-/* Подсказка: сверху слева, мелкая, полупрозрачная, не мешает кликам */
-#info{position:fixed;top:12px;left:16px;right:90px;z-index:1;font-size:12px;line-height:1.4;opacity:.5;pointer-events:none}
-#pw{all:unset;field-sizing:content;min-width:1px;color:inherit;caret-color:transparent}
-#us{animation:b 1s steps(1) infinite}                             /* подчёркивание мигает */
-@keyframes b{50%{opacity:0}}                                      /* в половине цикла - невидимо */
-#page{display:none;position:fixed;inset:0;padding:48px 8vw 40px;overflow:auto; /* дневник: на весь экран */
-  background:var(--glass);backdrop-filter:blur(12px)}             /* полупрозрачность + размытие фона */
+:root{--bg:#fff;--fg:#000}                       /* светлая тема */
+[data-theme=dark]{--bg:#000;--fg:#fff}           /* тёмная тема */
+body{margin:0;background:var(--bg);color:var(--fg);font:16px ui-monospace,Menlo,Consolas,monospace}
+#th{all:unset;position:fixed;top:8px;right:12px;z-index:9;font-size:22px;cursor:pointer} /* один символ, всегда поверх всего */
+#info{padding:12px 48px 0 16px;font-size:12px;line-height:1.4;opacity:.5} /* подсказка; справа место под кнопку */
+#lock{text-align:center;margin-top:8vh}
+#pw{all:unset;field-sizing:content;min-width:1px;caret-color:transparent} /* поле без рамки и без курсора | */
+#us{animation:b 1s steps(1) infinite}             /* мигающее _ */
+@keyframes b{50%{opacity:0}}
+#page{display:none;padding:40px 8vw}
 #t{outline:none;white-space:pre-wrap;min-height:50vh;caret-shape:underscore}
-#pics img{max-width:200px;margin:4px;border-radius:8px}
-#num{position:fixed;bottom:10px;width:100%;text-align:center;opacity:.35;font-size:14px;pointer-events:none}
+#pics img{max-width:200px;margin:4px}
+#num{position:fixed;bottom:8px;width:100%;text-align:center;opacity:.4;font-size:14px;pointer-events:none}
 </style>
 
+<button id="th"></button>
 <div id="info">
 Дневник хранится в одном файле diary2.bin внутри браузера, только на этом устройстве, и работает без интернета.
 Пароль превращается в ключ шифрования: без него файл не прочитать, а восстановить пароль нельзя.
@@ -35,127 +27,100 @@ body{background:var(--bg);color:var(--fg);font:16px ui-monospace,Menlo,Consolas,
 Листать записи: свайп или Alt+←/→, свайп влево с последней записи создаёт новую. Сохраняется само.
 Видео и другие файлы пока не поддерживаются.
 </div>
-
-<div id="themes"><button id="dk">☾</button><button id="lt">☼</button></div>
 <div id="lock"><span id="lab">пароль</span> <input id="pw" type="password" autofocus><span id="us">_</span></div>
 <div id="page"><div id="deco"></div><div id="t" contenteditable></div><div id="pics"></div></div>
 <div id="num"></div>
 
 <script>
-const enc = new TextEncoder(), dec = new TextDecoder();
-const $ = id => document.getElementById(id);
-const u32 = n => new Uint8Array(new Uint32Array([n]).buffer);
-let key, salt, file, handle, idx = [], cur = 0, photos = [], dirty = false, timer, memo = {}, last = '';
-// memo - запомненный код записей (чтобы не расшифровывать повторно), last - код, который показан сейчас
+const $ = id => document.getElementById(id), enc = new TextEncoder(), dec = new TextDecoder();
+const u32 = n => new Uint8Array(new Uint32Array([n]).buffer);   // число -> 4 байта (метка длины)
+let key, salt, file, handle, idx = [], cur = 0, photos = [], dirty, timer, memo = {}, last = '';
+// idx - список записей, cur - номер текущей, dirty - есть несохранённые правки, memo - кэш кода, last - показанный код
 
-// ---------- Темы ----------
-function theme(m) {
-  document.documentElement.dataset.theme = m;       // пишем тему в <html>, CSS сам подхватит цвета
-  $('dk').className = m == 'dark' ? 'on' : '';      // подсвечиваем выбранную кнопку
-  $('lt').className = m == 'dark' ? '' : 'on';
-  localStorage.theme = m;                           // запоминаем выбор
-}
-theme(localStorage.theme || (matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light'));
-$('dk').onclick = () => theme('dark');
-$('lt').onclick = () => theme('light');
+// ---------- Тема: кнопка показывает текущую (☾ тёмная, ☼ светлая) ----------
+const th = m => { document.documentElement.dataset.theme = m; $('th').textContent = m == 'dark' ? '☾' : '☼'; localStorage.theme = m; };
+th(localStorage.theme || (matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light'));
+$('th').onclick = () => th(document.documentElement.dataset.theme == 'dark' ? 'light' : 'dark');
 
-  // ---------- Файл ----------
-async function makeKey(pw, salt) {
-  const base = await crypto.subtle.importKey('raw', enc.encode(pw), 'PBKDF2', false, ['deriveKey']);
-  return crypto.subtle.deriveKey({name:'PBKDF2', salt, iterations:100000, hash:'SHA-256'},
-    base, {name:'AES-GCM', length:256}, false, ['encrypt','decrypt']);
-}
-async function write(parts) {
+// ---------- Файл: [соль 16][метка 4][флаг 1][iv 12][данные] ... ----------
+const makeKey = async (pw, salt) => crypto.subtle.deriveKey(      // из пароля и соли делаем ключ
+  {name:'PBKDF2', salt, iterations:100000, hash:'SHA-256'},
+  await crypto.subtle.importKey('raw', enc.encode(pw), 'PBKDF2', false, ['deriveKey']),
+  {name:'AES-GCM', length:256}, false, ['encrypt','decrypt']);
+
+async function write(parts) {                        // записываем файл из кусочков
   const w = await handle.createWritable();
-  await w.write(new Blob(parts));
-  await w.close();
+  await w.write(new Blob(parts)); await w.close();
   file = await handle.getFile();
 }
-async function scan() {                              // идём по меткам, запоминаем где запись и есть ли в ней код
-  idx = []; memo = {}; let pos = 16;
-  while (pos < file.size) {
-    const h = new Uint8Array(await file.slice(pos, pos + 5).arrayBuffer()); // 4 байта метки + 1 байт флага
+async function scan() {                              // идём по меткам и запоминаем записи (сами не читаем)
+  idx = []; memo = {};
+  for (let pos = 16; pos < file.size;) {
+    const h = new Uint8Array(await file.slice(pos, pos + 5).arrayBuffer());  // метка + флаг
     const n = new DataView(h.buffer).getUint32(0, true);
-    idx.push({s: pos + 4, n, f: h[4]});              // f = 1, если в записи есть код оформления
+    idx.push({s: pos + 4, n, f: h[4]});              // f = 1: в записи есть код оформления
     pos += 4 + n;
   }
 }
-
-// ---------- Чтение записи и оформления ----------
 async function open(i) {                             // достаём и расшифровываем запись i
   const {s, n} = idx[i];
-  const b = new Uint8Array(await file.slice(s + 1, s + n).arrayBuffer()); // s+1: пропускаем байт-флаг
-  const plain = await crypto.subtle.decrypt({name:'AES-GCM', iv: b.slice(0,12)}, key, b.slice(12));
+  const b = new Uint8Array(await file.slice(s + 1, s + n).arrayBuffer());
+  const plain = await crypto.subtle.decrypt({name:'AES-GCM', iv: b.slice(0, 12)}, key, b.slice(12));
   const jl = new DataView(plain).getUint32(0, true);
-  const meta = JSON.parse(dec.decode(plain.slice(4, 4 + jl)));
-  let pos = 4 + jl, p = [];
-  for (const size of meta.p) { p.push(new Blob([plain.slice(pos, pos + size)], {type:'image/webp'})); pos += size; }
-  return {t: meta.t, p};
+  const meta = JSON.parse(dec.decode(plain.slice(4, 4 + jl)));   // t - текст, p - размеры фото
+  let pos = 4 + jl;
+  return {t: meta.t, p: meta.p.map(size => new Blob([plain.slice(pos, pos += size)], {type:'image/webp'}))};
 }
-// Вытаскиваем всё, что лежит между <<< и >>>
-const getCode = text => (text.match(/<<<([\s\S]*?)>>>/g) || []).map(m => m.slice(3, -3)).join('\n');
-// Какое оформление действует на запись i: своё, а если нет - от ближайшей предыдущей с кодом
-async function styleFor(i, text) {
-  const own = getCode(text);
-  if (own) return own;
-  for (let k = i - 1; k >= 0; k--)
-    if (idx[k].f) return memo[k] ??= getCode((await open(k)).t); // запоминаем, чтобы не расшифровывать снова
-  return '';
-}
-async function deco() {                              // применяем оформление
-  const c = await styleFor(cur, $('t').innerText);
-  if (c !== last) { $('deco').innerHTML = c; last = c; } // меняем только если код изменился (нет мигания)
+
+// ---------- Оформление ----------
+const getCode = text => (text.match(/<<<([\s\S]*?)>>>/g) || []).map(m => m.slice(3, -3)).join('\n'); // всё между <<< и >>>
+async function deco() {                              // свой код записи, иначе от ближайшей предыдущей с кодом
+  let c = getCode($('t').innerText);
+  for (let k = cur - 1; !c && k >= 0; k--) if (idx[k].f) c = memo[k] ??= getCode((await open(k)).t);
+  if (c !== last) $('deco').innerHTML = last = c || ''; // обновляем только при изменении (нет мигания)
 }
 
 // ---------- Показ ----------
 function draw() {
   $('num').textContent = (cur + 1) + ' / ' + Math.max(idx.length, cur + 1);
-  $('pics').innerHTML = '';
-  photos.forEach(b => { const im = new Image(); im.src = URL.createObjectURL(b); $('pics').append(im); });
+  $('pics').replaceChildren(...photos.map(b => Object.assign(new Image(), {src: URL.createObjectURL(b)})));
   deco();
 }
-async function show(i) {
-  const e = await open(i);
-  cur = i; photos = e.p; $('t').innerText = e.t;
-  draw();
-}
+async function show(i) { const e = await open(i); cur = i; photos = e.p; $('t').innerText = e.t; draw(); }
 
 // ---------- Сохранение ----------
 async function save() {
   const text = $('t').innerText;
-  if (!text.trim() && !photos.length) return;
+  if (!text.trim() && !photos.length) return;        // пустое не сохраняем
   const json = enc.encode(JSON.stringify({t: text, p: photos.map(b => b.size)}));
   const plain = await new Blob([u32(json.length), json, ...photos]).arrayBuffer();
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ct = await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, plain);
-  // метка (длина = флаг 1 + iv 12 + данные) + флаг "есть код" + iv + данные
   const block = new Blob([u32(13 + ct.byteLength), Uint8Array.of(getCode(text) ? 1 : 0), iv, ct]);
-  const parts = [salt];
-  idx.forEach((e, k) => parts.push(k == cur ? block : file.slice(e.s - 4, e.s + e.n)));
-  if (cur >= idx.length) parts.push(block);
+  const parts = [salt, ...idx.map((e, k) => k == cur ? block : file.slice(e.s - 4, e.s + e.n))]; // чужие записи копируем как есть
+  if (cur >= idx.length) parts.push(block);          // новая запись - в конец
   await write(parts); await scan(); dirty = false;
 }
-function changed() { dirty = true; clearTimeout(timer); timer = setTimeout(save, 1500); deco(); }
+function changed() { dirty = true; clearTimeout(timer); timer = setTimeout(save, 1500); deco(); } // автосохранение через 1.5 с
 $('t').oninput = changed;
 
-// ---------- Переходы ----------
+// ---------- Переходы: Alt+стрелки или свайп ----------
 async function go(i) {
   if (!key || i < 0) return;
   clearTimeout(timer); if (dirty) await save();
   if (i < idx.length) await show(i);
-  else if (cur < idx.length) { cur = idx.length; photos = []; $('t').innerText = ''; draw(); }
+  else if (cur < idx.length) { cur = idx.length; photos = []; $('t').innerText = ''; draw(); } // новая пустая запись
 }
-document.onkeydown = e => { if (e.altKey && e.key == 'ArrowLeft') go(cur - 1); if (e.altKey && e.key == 'ArrowRight') go(cur + 1); };
+document.onkeydown = e => e.altKey && go(cur + (e.key == 'ArrowRight') - (e.key == 'ArrowLeft'));
 let x0; document.ontouchstart = e => x0 = e.touches[0].clientX;
 document.ontouchend = e => { const d = e.changedTouches[0].clientX - x0; if (Math.abs(d) > 100) go(cur + (d < 0 ? 1 : -1)); };
 
-// ---------- Фото ----------
+// ---------- Фото: перетащить на страницу, превращается в WebP ----------
 document.ondragover = e => e.preventDefault();
 document.ondrop = async e => {
   e.preventDefault();
   for (const f of e.dataTransfer.files) {
-    const bmp = await createImageBitmap(f);
-    const c = new OffscreenCanvas(bmp.width, bmp.height);
+    const bmp = await createImageBitmap(f), c = new OffscreenCanvas(bmp.width, bmp.height);
     c.getContext('2d').drawImage(bmp, 0, 0);
     photos.push(await c.convertToBlob({type:'image/webp', quality:0.9}));
   }
@@ -166,17 +131,15 @@ document.ondrop = async e => {
 document.body.onclick = () => $('lock').style.display != 'none' && $('pw').focus();
 $('pw').onkeydown = async e => {
   if (e.key != 'Enter') return;
-  const root = await navigator.storage.getDirectory();
-  handle = await root.getFileHandle('diary2.bin', {create: true});   // diary2: формат файла изменился
+  handle = await (await navigator.storage.getDirectory()).getFileHandle('diary2.bin', {create: true});
   file = await handle.getFile();
-  if (file.size == 0) { salt = crypto.getRandomValues(new Uint8Array(16)); await write([salt]); }
-  else salt = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+  if (file.size) salt = new Uint8Array(await file.slice(0, 16).arrayBuffer());                // старый дневник: читаем соль
+  else await write([salt = crypto.getRandomValues(new Uint8Array(16))]);                      // новый: создаём соль
   key = await makeKey($('pw').value, salt);
   await scan();
-  try { if (idx.length) await show(idx.length - 1); else draw(); }
+  try { idx.length ? await show(idx.length - 1) : draw(); }                                   // открываем последнюю запись
   catch { key = null; $('pw').value = ''; $('lab').textContent = 'неверно'; setTimeout(() => $('lab').textContent = 'пароль', 1200); return; }
-  $('lock').style.display = 'none';
-  $('info').style.display = 'none';   // после входа подсказка больше не нужна
+  $('lock').style.display = $('info').style.display = 'none';                                 // прячем пароль и подсказку
   $('page').style.display = 'block';
 };
 
