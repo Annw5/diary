@@ -7,21 +7,23 @@
 body{margin:0;background:var(--bg);color:var(--fg);font:16px ui-monospace,Menlo,Consolas,monospace}
 #th{all:unset;position:fixed;top:8px;right:12px;z-index:9;font-size:22px;cursor:pointer}
 #info{padding:12px 48px 0 16px;font-size:12px;line-height:1.4;opacity:.5}
-#lock{text-align:center;margin-top:8vh;padding:8px 0;position:sticky;top:0;background:var(--bg);z-index:1} /* строка пароля/команд, при прокрутке остаётся сверху */
-#pw{all:unset;field-sizing:content;min-width:1px;caret-color:transparent}
-#us{animation:b 1s steps(1) infinite}
+#lock{margin:8vh 0 0;padding:8px 0;text-align:center;position:sticky;top:0;background:var(--bg);z-index:1;cursor:text}
+#pw{position:absolute;opacity:0;width:1px;height:1px;padding:0;border:0}  /* настоящее поле невидимо: ввод рисуем сами */
+#pa,#pb{white-space:pre}
+#us{display:inline-block;width:0;overflow:visible;animation:b 1s steps(1) infinite} /* курсор _ : не занимает места, мигает */
+#pw:not(:focus)~#us{animation:none;opacity:.4}   /* если ввод не здесь, _ тусклый и не мигает */
 @keyframes b{50%{opacity:0}}
 #page{display:none;padding:16px 8vw 40px}
-#t{outline:none;min-height:50vh;caret-shape:underscore}
+#t{outline:none;min-height:70vh;caret-shape:underscore}
 #t img{max-width:200px;margin:4px}
-table{border-collapse:collapse;margin:8px 0}     /* таблицы и календарь: тонкие линии цвета текста */
+table{border-collapse:collapse;margin:8px 0}
 td{border:1px solid;padding:2px 8px;min-width:3ch}
-.box{border:1px solid;padding:8px;margin:8px 0}  /* текстовое поле */
+.box{border:1px solid;padding:8px;margin:8px 0}
 hr{border:0;border-top:1px solid}
 #num{position:fixed;bottom:8px;width:100%;text-align:center;opacity:.4;font-size:14px;pointer-events:none}
 </style>
 
-<button id="th"></button>
+<button id="th">☾</button>
 <div id="info">
 Дневник хранится в одном файле diary3.bin внутри браузера, только на этом устройстве, и работает без интернета.
 Пароль превращается в ключ шифрования: без него файл не прочитать, а восстановить пароль нельзя.
@@ -30,11 +32,13 @@ hr{border:0;border-top:1px solid}
 Оформление: HTML/CSS между &lt;&lt;&lt; и &gt;&gt;&gt; действует на эту и следующие записи, пока не встретится новый код.
 Видео и другие файлы пока не поддерживаются.
 </div>
-<div id="lock"><span id="lab">пароль</span> <input id="pw" type="password" autofocus autocomplete="off" autocapitalize="off"><span id="us">_</span></div>
+<form id="lock"><span id="lab">пароль</span> <input id="pw" autofocus autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="go"><span id="pa"></span><span id="us">_</span><span id="pb"></span></form>
 <div id="page"><div id="deco"></div><div id="t" contenteditable></div></div>
 <div id="num"></div>
 
 <script>
+onerror = m => alert(m);                         // если что-то сломается, появится окно с текстом ошибки
+onunhandledrejection = e => alert(e.reason);
 const $ = id => document.getElementById(id), enc = new TextEncoder(), dec = new TextDecoder();
 const u32 = n => new Uint8Array(new Uint32Array([n]).buffer);   // число -> 4 байта (метка длины)
 let key, salt, file, handle, idx = [], cur = 0, photos = [], dirty, timer, memo = {}, last = '', rg;
@@ -45,6 +49,14 @@ let key, salt, file, handle, idx = [], cur = 0, photos = [], dirty, timer, memo 
 const th = m => { document.documentElement.dataset.theme = m; $('th').textContent = m == 'dark' ? '☾' : '☼'; localStorage.theme = m; };
 th(localStorage.theme || (matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light'));
 $('th').onclick = () => th(document.documentElement.dataset.theme == 'dark' ? 'light' : 'dark');
+
+// ---------- Строка ввода: настоящее поле невидимо, а мы рисуем текст и мигающий _ там, где стоит курсор ----------
+function sync() {
+  const p = $('pw'), v = key ? p.value : '•'.repeat(p.value.length), i = p.selectionStart;  // до входа показываем точки
+  $('pa').textContent = v.slice(0, i);   // текст до курсора
+  $('pb').textContent = v.slice(i);      // текст после курсора
+}
+for (const ev of ['input', 'keyup', 'click', 'focus', 'select']) $('pw').addEventListener(ev, sync);
 
 // ---------- Файл: [соль 16][метка 4][флаг 1][iv 12][данные] ... ----------
 const makeKey = async (pw, salt) => crypto.subtle.deriveKey(
@@ -116,15 +128,24 @@ function changed() { dirty = true; clearTimeout(timer); timer = setTimeout(save,
 $('t').oninput = changed;
 $('t').onclick = e => { if (e.target.type == 'checkbox') { e.target.toggleAttribute('checked', e.target.checked); changed(); } }; // запоминаем галочки
 
-// ---------- Вставка элементов ----------
-document.onselectionchange = () => {                 // запоминаем, где стоял курсор в записи
-  const s = getSelection();
+// ---------- Куда ставить курсор и вставка элементов ----------
+document.onselectionchange = () => {
+  sync();
+  const s = getSelection();                          // запоминаем, где стоял курсор в записи
   if (s.rangeCount && $('t').contains(s.anchorNode)) rg = s.getRangeAt(0).cloneRange();
 };
-function ins(x) {                                    // вставляем HTML-строку или элемент в запомненное место (или в конец)
+function edit(el) {                                  // переносим ввод в запись: в el, иначе где был курсор, иначе в конец
+  $('t').focus();
+  const s = getSelection();
+  if (el) return s.selectAllChildren(el);
+  s.removeAllRanges();
+  if (rg) s.addRange(rg); else { s.selectAllChildren($('t')); s.collapseToEnd(); }
+}
+function ins(x) {                                    // вставляем HTML-строку или элемент
   const f = typeof x == 'string' ? document.createRange().createContextualFragment(x) : x;
-  if (rg) { rg.deleteContents(); rg.insertNode(f); rg.collapse(false); } else $('t').append(f);
-  changed();
+  const el = (f.firstChild || f).querySelector?.('td,li,.box,h2');   // куда поставить курсор: первая ячейка/пункт/поле
+  if (rg) { rg.collapse(false); rg.insertNode(f); rg.collapse(false); } else $('t').append(f);
+  changed(); edit(el);
 }
 async function addPhotos(files) {                    // фото -> WebP -> в запись
   for (const f of files) {
@@ -155,16 +176,17 @@ const cmds = {                                       // команды: слов
   заголовок: () => ins('<h2>Заголовок</h2>' + end),
   линия: () => ins('<hr>'),
   дата: () => ins(new Date().toLocaleDateString('ru')),
+  тема: () => $('th').click(),
   новая: () => go(idx.length), назад: () => go(cur - 1), вперёд: () => go(cur + 1)
 };
 function run() {                                     // разбираем строку: слово + числа после него
   const [c, ...a] = $('pw').value.trim().toLowerCase().split(/\s+/);
-  $('pw').value = '';
+  $('pw').value = ''; sync();
   cmds[c] ? cmds[c](...a) : c && flash('нет такой команды');
 }
 const flash = m => { $('lab').textContent = m; setTimeout(() => $('lab').textContent = key ? 'команда' : 'пароль', 1200); };
 
-// ---------- Переходы ----------
+// ---------- Переходы и клавиши ----------
 async function go(i) {
   if (!key || i < 0) return;
   clearTimeout(timer); if (dirty) await save();
@@ -172,4 +194,37 @@ async function go(i) {
   else if (cur < idx.length) { cur = idx.length; photos = []; rg = null; $('t').innerHTML = ''; draw(); } // новая пустая запись
 }
 document.onkeydown = e => {
-  if (e.key == 'Escape') $('pw').focus();            // Esc -
+  if (e.key == 'Escape') $('pw').focus();            // Esc - в строку команд
+  else if (e.altKey && /Arrow[LR]/.test(e.key)) go(cur + (e.key == 'ArrowRight' ? 1 : -1)); // Alt+стрелки - листать записи
+};
+$('t').onkeydown = e => { if (e.key == 'Tab') { e.preventDefault(); $('pw').focus(); } };            // Tab в записи - к командам
+$('pw').onkeydown = e => { if (key && (e.key == 'Tab' || e.key == 'ArrowDown')) { e.preventDefault(); edit(); } }; // Tab или ↓ - писать в запись
+let x0; document.ontouchstart = e => x0 = e.touches[0].clientX;
+document.ontouchend = e => { const d = e.changedTouches[0].clientX - x0; if (Math.abs(d) > 100) go(cur + (d < 0 ? 1 : -1)); };
+document.ondragover = e => e.preventDefault();       // фото можно перетащить на страницу
+document.ondrop = e => { e.preventDefault(); addPhotos(e.dataTransfer.files); };
+
+// ---------- Вход ----------
+async function login() {
+  handle = await (await navigator.storage.getDirectory()).getFileHandle('diary3.bin', {create: true});
+  file = await handle.getFile();
+  if (file.size) salt = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+  else await write([salt = crypto.getRandomValues(new Uint8Array(16))]);
+  key = await makeKey($('pw').value, salt);
+  await scan();
+  try { idx.length ? await show(idx.length - 1) : draw(); }
+  catch { key = null; $('pw').value = ''; sync(); return flash('неверно'); }
+  $('pw').value = ''; sync(); $('lab').textContent = 'команда';  // строка пароля становится строкой команд
+  $('lock').style.marginTop = 0;
+  $('info').textContent = 'Команды: фото · таблица [столбцы строки] · календарь [месяц год] · список · чек · поле · заголовок · линия · дата · тема · новая · назад · вперёд. Enter - выполнить, Tab или ↓ - писать в запись, Tab или Esc - обратно к командам, Alt+←/→ - листать записи.';
+  $('page').style.display = 'block';
+}
+$('lock').onsubmit = e => { e.preventDefault(); key ? run() : login(); };  // Enter (и кнопка "Ввод" на экранной клавиатуре)
+document.body.onclick = () => !key && $('pw').focus();   // до входа клик в любом месте = ввод пароля
+$('lock').onclick = () => $('pw').focus();               // после входа - клик по строке команд
+$('page').onclick = e => e.target == $('page') && edit();   // клик по свободному месту - писать в запись
+sync();
+
+navigator.storage.persist();
+navigator.serviceWorker.register('sw.js');
+</script>
