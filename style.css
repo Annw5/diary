@@ -1,0 +1,29 @@
+/* ===== Цвета: две темы ===== */
+:root { --bg: #fff; --fg: #000; }
+[data-theme=dark] { --bg: #000; --fg: #fff; }
+
+/* ===== Общее ===== */
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px ui-monospace, Menlo, Consolas, monospace; }
+#th   { all: unset; position: fixed; top: 8px; right: 12px; z-index: 9; font-size: 22px; cursor: pointer; } /* кнопка темы */
+#info { padding: 12px 48px 0 16px; font-size: 12px; line-height: 1.4; opacity: .5; }                      /* подсказка сверху */
+#num  { position: fixed; bottom: 8px; width: 100%; text-align: center; opacity: .4; font-size: 14px; pointer-events: none; } /* номер записи */
+
+/* ===== Строка пароля / команд ===== */
+#lock  { margin: 8vh 0 0; padding: 8px 0; text-align: center; position: sticky; top: 0; background: var(--bg); z-index: 1; cursor: text; }
+#pw    { position: absolute; opacity: 0; width: 1px; height: 1px; padding: 0; border: 0; } /* настоящее поле невидимо */
+#pa, #pb { white-space: pre; }                                                              /* текст до и после курсора */
+#us    { display: inline-block; width: 0; overflow: visible; animation: blink 1s steps(1) infinite; } /* курсор _ без ширины */
+#pw:not(:focus) ~ #us { animation: none; opacity: .4; }                                     /* без фокуса: тусклый, не мигает */
+@keyframes blink { 50% { opacity: 0; } }
+#hints      { font-size: 13px; min-height: 1.2em; }                                         /* подсказки команд */
+#hints span { opacity: .45; margin: 0 4px; }
+#hints .on  { opacity: 1; }                                                                 /* первая: её выполнит Enter */
+
+/* ===== Дневник ===== */
+#page { display: none; padding: 16px 8vw 40px; }
+#t    { outline: none; min-height: 70vh; caret-shape: underscore; }  /* курсор _ (Chrome 138+) */
+#t img { max-width: 200px; margin: 4px; }
+table { border-collapse: collapse; margin: 8px 0; }
+td    { border: 1px solid; padding: 2px 8px; min-width: 3ch; }
+.box  { border: 1px solid; padding: 8px; margin: 8px 0; }           /* текстовое поле */
+hr    { border: 0; border-top: 1px solid; }
