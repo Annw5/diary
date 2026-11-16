@@ -15,7 +15,7 @@
 Видео и другие файлы пока не поддерживаются.
 </div>
 
-<!-- Строка пароля, потом команд. Настоящее поле невидимо, текст и курсор _ рисует terminal.js -->
+<!-- Строка пароля, потом команд. Настоящее поле невидимо, текст и курсор _ рисует app.js -->
 <form id="lock">
   <span id="lab">пароль</span>
   <input id="pw" autofocus autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="go">
@@ -27,5 +27,5 @@
 <div id="page"><div id="deco"></div><div id="t" contenteditable></div></div>
 <div id="num"></div>
 
-<script src="js/debug.js"></script>
-<script type="module" src="js/main.js"></script>
+<script>onerror = m => alert(m); onunhandledrejection = e => alert(e.reason);</script> <!-- временно: окно с текстом ошибки -->
+<script src="app.js" defer></script>
