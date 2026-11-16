@@ -1,16 +1,10 @@
-// Версия кэша. Изменил любой файл сайта - увеличь число, и браузеры обновят свою копию.
-const V = 'v7';
-const FILES = ['./', 'index.html', 'style.css', 'js/debug.js', 'js/main.js', 'js/state.js',
-               'js/storage.js', 'js/entry.js', 'js/commands.js', 'js/terminal.js', 'js/ui.js'];
+// Офлайн-режим: файлы сайта лежат в кэше и открываются без интернета, а при наличии сети обновляются в фоне
+// (новая версия сайта появится при следующем заходе). Добавил новый файл сайта - допиши его в список.
+const FILES = ['./', 'index.html', 'style.css', 'app.js'];
 
-// Установка: кладём все файлы в кэш
-self.addEventListener('install', e => {
-  e.waitUntil(caches.open(V).then(c => c.addAll(FILES)));
-  self.skipWaiting();
-});
-// Активация: удаляем кэши старых версий
-self.addEventListener('activate', e =>
-  e.waitUntil(caches.keys().then(names => Promise.all(names.filter(n => n != V).map(n => caches.delete(n))))));
-// Запрос: сначала ищем в кэше, потом в сети
-self.addEventListener('fetch', e =>
-  e.respondWith(caches.match(e.request).then(r => r || fetch(e.request))));
+self.addEventListener('install', e => e.waitUntil(caches.open('d').then(c => c.addAll(FILES))));
+self.addEventListener('fetch', e => e.respondWith(caches.open('d').then(async c => {
+  const old = await c.match(e.request);                                                           // копия из кэша
+  const fresh = fetch(e.request).then(r => (r.ok && c.put(e.request, r.clone()), r)).catch(() => old); // свежая из сети
+  return old || fresh;                                                                            // копия есть - отдаём сразу
+})));
