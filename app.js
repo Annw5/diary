@@ -76,7 +76,7 @@ function stopScripts() {
 function runScripts() {
   for (const old of $('deco').querySelectorAll('script')) {   // все <script> из оформления (они сейчас «мёртвые»)
     const s = document.createElement('script');                // создаём живой
-    s.textContent = 'try {' + old.textContent + '\n} catch (e) { alert("Ошибка в оформлении: " + e.message) }';
+    s.textContent = '(() => { try {' + old.textContent + '\n} catch (e) { alert("Ошибка в оформлении: " + e.message) } })()';
     old.replaceWith(s);                                        // подменяем: при вставке в страницу он выполняется
   }
 }
