@@ -10,7 +10,7 @@ body { margin: 0; background: var(--bg); color: var(--fg); font: 16px ui-monospa
 
 /* ===== Строка пароля / команд ===== */
 #lock  { margin: 8vh 0 0; padding: 8px 0; text-align: center; position: sticky; top: 0; background: var(--bg); z-index: 1; cursor: text; }
-#pw    { position: absolute; opacity: 0; width: 1px; height: 1px; padding: 0; border: 0; } /* настоящее поле невидимо */
+#pw    { position: absolute; opacity: 0; width: 1px; height: 1px; padding: 0; border: 0; font: inherit; } /* настоящее поле невидимо; 16px, чтобы iOS не увеличивал страницу */
 #pa, #pb { white-space: pre; }                                                              /* текст до и после курсора */
 #us    { display: inline-block; width: 0; overflow: visible; animation: blink 1s steps(1) infinite; } /* курсор _ без ширины */
 #pw:not(:focus) ~ #us { animation: none; opacity: .4; }                                     /* без фокуса: тусклый, не мигает */
@@ -21,7 +21,7 @@ body { margin: 0; background: var(--bg); color: var(--fg); font: 16px ui-monospa
 
 /* ===== Дневник ===== */
 #page { display: none; padding: 16px 8vw 40px; }
-#t    { outline: none; min-height: 70vh; caret-shape: underscore; }  /* курсор _ (Chrome 138+) */
+#t    { outline: none; min-height: 70vh; overflow-x: auto; caret-shape: underscore; }  /* широкие таблицы прокручиваются; курсор _ (Chrome 138+) */
 #t img { max-width: 200px; margin: 4px; }
 table { border-collapse: collapse; margin: 8px 0; }
 td    { border: 1px solid; padding: 2px 8px; min-width: 3ch; }
