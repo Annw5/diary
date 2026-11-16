@@ -5,6 +5,7 @@ const u32 = n => new Uint8Array(new Uint32Array([n]).buffer);   // число ->
 const MAXSIDE = 2048;     // фото крупнее уменьшаем до такой стороны: файл меньше, слабым телефонам легче
 
 // ---------- Переменные ----------
+let off = false, stops = [];   // off: оформление отключено командой «стоп»; stops: функции «убрать за собой» от скриптов
 let key, salt, handle, file;                 // ключ шифрования, "соль", файл diary3.bin (дескриптор и содержимое)
 let idx = [], memo = {};                     // записи {s: начало, n: длина, f: есть код оформления}; запомненный код записей
 let cur = 0, photos = [], urls = [], rg;     // номер открытой записи, её фото, ссылки на фото, запомненное место курсора
@@ -67,10 +68,24 @@ async function saveEntry(meta) {             // шифруем открытую 
 // ---------- Запись ----------
 const getCode = text => (text.match(/<<<([\s\S]*?)>>>/g) || []).map(m => m.slice(3, -3)).join('\n');  // код между <<< и >>>
 
+const onStop = f => stops.push(f);          // скрипт оформления вызывает onStop(() => ...), чтобы зарегистрировать уборку
+function stopScripts() {
+  stops.forEach(f => { try { f(); } catch (e) { console.error(e); } });   // вызываем каждую уборку, ошибка в одной не мешает остальным
+  stops = [];                                // список очищаем
+}
+function runScripts() {
+  for (const old of $('deco').querySelectorAll('script')) {   // все <script> из оформления (они сейчас «мёртвые»)
+    const s = document.createElement('script');                // создаём живой
+    s.textContent = 'try {' + old.textContent + '\n} catch (e) { alert("Ошибка в оформлении: " + e.message) }';
+    old.replaceWith(s);                                        // подменяем: при вставке в страницу он выполняется
+  }
+}
+
 async function deco() {                      // оформление: свой код записи, иначе от ближайшей предыдущей с кодом
   let code = getCode($('t').innerText);
   for (let k = cur - 1; !code && k >= 0; k--) if (idx[k].f) code = memo[k] ??= (await readEntry(k)).c;
-  if (code !== shown) $('deco').innerHTML = shown = code || '';   // меняем только при изменении (без мигания)
+  if (off) code = '';                        // отключено командой «стоп»: показываем без оформления
+  if (code !== shown) { stopScripts(); $('deco').innerHTML = shown = code || ''; }
 }
 function draw() {
   $('num').textContent = (cur + 1) + ' / ' + Math.max(idx.length, cur + 1);
@@ -166,7 +181,10 @@ const cmds = {
   тема: () => $('th').click(),
   новая: () => go(idx.length),
   назад: () => go(cur - 1),
-  вперёд: () => go(cur + 1)
+  вперёд: () => go(cur + 1),
+  запуск: async () => { off = false; shown = null; await deco(); runScripts(); },
+  стоп: () => { off = true; deco(); },
+  хелп: () => { const i = $('info'); i.textContent = HELP; i.hidden = !i.hidden; }
 };
 
 // ---------- Строка ввода: пароль, потом команды ----------
@@ -222,7 +240,7 @@ async function login() {
   busy = false; setLine();
   $('lab').textContent = 'команда';          // строка пароля становится строкой команд
   $('lock').style.marginTop = 0;
-  $('info').textContent = HELP;
+  $('info').hidden = true;                   // после входа подсказка скрыта, её показывает команда «хелп»
   $('page').style.display = 'block';
 }
 
