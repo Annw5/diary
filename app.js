@@ -152,7 +152,7 @@ async function addPhotos(files) {            // фото -> уменьшить -
 }
 
 const END = '<div><br></div>';               // пустая строка после элемента, чтобы можно было писать дальше
-const CHK = '<div class="chk"><span contenteditable="false"><input type="checkbox"></span>&nbsp;</div>';  // строка дел: квадратик (его можно нажимать) и текст
+const CHK = '<div class="chk"><span class="cb" contenteditable="false">☐</span>&nbsp;</div>';  // строка дел: квадратик ☐ (его можно нажимать) и текст
 const FIRST = 'td,li,.box,h2,.chk';          // куда ставить курсор после вставки: первая ячейка/пункт/поле/строка дел
 const table = (c, r) => '<table>' + ('<tr>' + '<td>&nbsp;</td>'.repeat(c) + '</tr>').repeat(r) + '</table>' + END;
 function calendar(m, y) {                    // месяц m и год y (если не указаны, текущие)
@@ -250,7 +250,7 @@ async function login() {
 $('t').oninput = changed;
 $('t').onclick = e => {
   const x = e.target;
-  if (x.type == 'checkbox') { x.toggleAttribute('checked', x.checked); changed(); }   // запоминаем галочки в списках дел
+  if (x.className == 'cb') { x.textContent = x.textContent == '☐' ? '☑' : '☐'; changed(); }   // ☐ <-> ☑: отмечаем задачу выполненной
   if (x.className == 'star') {                                                         // ☆: показываем случайный пункт списка выше
     const box = x.closest('.rnd'), items = [...box.querySelectorAll('li')].map(li => li.textContent.trim()).filter(Boolean);
     if (items.length) { box.querySelector('span').textContent = items[Math.floor(Math.random() * items.length)]; changed(); }
@@ -260,7 +260,7 @@ $('t').onbeforeinput = e => {                // Enter в списке дел: н
   const a = getSelection().anchorNode, line = (a?.closest ? a : a?.parentElement)?.closest('.chk');
   if (e.inputType != 'insertParagraph' || !line) return;
   e.preventDefault();
-  const empty = !line.textContent.trim();
+  const empty = !line.textContent.replace(/[☐☑]/, '').trim();   // в строке нет текста, кроме квадратика
   line.insertAdjacentHTML('afterend', empty ? END : CHK);
   const next = line.nextElementSibling;
   if (empty) line.remove();
