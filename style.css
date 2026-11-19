@@ -5,11 +5,12 @@
 /* ===== Общее ===== */
 body { margin: 0; background: var(--bg); color: var(--fg); font: 16px ui-monospace, Menlo, Consolas, monospace; }
 #th   { all: unset; position: fixed; top: 8px; right: 12px; z-index: 9; font-size: 22px; cursor: pointer; } /* кнопка темы */
-#info { padding: 12px 48px 0 16px; font-size: 12px; line-height: 1.4; opacity: .5; }                      /* подсказка сверху */
 #num  { position: fixed; bottom: 8px; width: 100%; text-align: center; opacity: .4; font-size: 14px; pointer-events: none; } /* номер записи */
+#top  { position: sticky; top: 0; background: var(--bg); z-index: 1; }   /* подсказка и терминал не уезжают при прокрутке */
+#info { padding: 12px 48px 0 16px; font-size: 12px; line-height: 1.4; opacity: .5; max-height: 30vh; overflow: auto; }
 
 /* ===== Строка пароля / команд ===== */
-#lock  { margin: 8vh 0 0; padding: 8px 0; text-align: center; position: sticky; top: 0; background: var(--bg); z-index: 1; cursor: text; }
+#lock  { margin: 8vh 0 0; padding: 8px 0; text-align: center; cursor: text; }
 #pw    { position: absolute; opacity: 0; width: 1px; height: 1px; padding: 0; border: 0; font: inherit; } /* настоящее поле невидимо; 16px, чтобы iOS не увеличивал страницу */
 #pa, #pb { white-space: pre; }                                                              /* текст до и после курсора */
 #us    { display: inline-block; width: 0; overflow: visible; animation: blink 1s steps(1) infinite; } /* курсор _ без ширины */
@@ -27,3 +28,7 @@ table { border-collapse: collapse; margin: 8px 0; }
 td    { border: 1px solid; padding: 2px 8px; min-width: 3ch; }
 .box  { border: 1px solid; padding: 8px; margin: 8px 0; }           /* текстовое поле */
 hr    { border: 0; border-top: 1px solid; }
+.rnd  { border: 1px solid; margin: 8px 0; }                            /* "рандом": список и строка с кнопкой */
+.rnd ul { margin: 0; padding: 8px 8px 8px 28px; }
+.res  { border-top: 2px solid; padding: 4px 8px; font-weight: bold; }  /* выделенная строка с результатом */
+.star { all: unset; cursor: pointer; font-size: 20px; }                /* кнопка-символ ☆ */
