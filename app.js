@@ -174,6 +174,7 @@ const cmds = {
   календарь: (m, y) => ins(calendar(m, y)),                                    // календарь [месяц год]
   список: () => ins('<ul><li>&nbsp;</li></ul>'),
   чек: () => ins('<div><input type="checkbox"> &nbsp;</div>'),
+  рандом: () => ins('<div class="rnd"><ul><li>&nbsp;</li></ul><div class="res" contenteditable="false"><button class="star">☆</button> <span></span></div></div>' + END),
   поле: () => ins('<div class="box"><br></div>' + END),
   заголовок: () => ins('<h2>Заголовок</h2>' + END),
   линия: () => ins('<hr>'),
@@ -184,12 +185,12 @@ const cmds = {
   вперёд: () => go(cur + 1),
   запуск: async () => { off = false; shown = null; await deco(); runScripts(); },
   стоп: () => { off = true; deco(); },
-  хелп: () => { const i = $('info'); i.textContent = HELP; i.hidden = !i.hidden; }
+  хелп: () => $('info').hidden = !$('info').hidden      // спрятать/показать подсказку сверху
 };
 
 // ---------- Строка ввода: пароль, потом команды ----------
 const HELP = 'Команды: ' + Object.keys(cmds).join(' · ') + '. Enter - выполнить первую подсказку, ↑↓ - история команд, ' +
-  'Tab - писать в запись (в записи Tab или Esc - обратно), Alt+←/→ - листать записи. Параметры: таблица [столбцы строки], календарь [месяц год].';
+     'Tab - писать в запись (в записи Tab или Esc - обратно), Alt+←/→ - листать записи. Параметры: таблица [столбцы строки], календарь [месяц год]. ' + 'Рандом: пиши пункты списка, кнопка ☆ выберет случайный. Хелп - спрятать или вернуть эту подсказку.';
 const parse = () => $('pw').value.trim().toLowerCase().split(/\s+/);   // ['слово', 'число', ...]
 function match(word) {                       // подходящие команды и та, что выполнится
   const list = Object.keys(cmds).filter(n => word && n.startsWith(word));
@@ -209,7 +210,7 @@ function setLine(v = '') {                   // заменить текст в �
 }
 const flash = m => {                         // сообщение вместо слова "команда"/"пароль" на секунду
   $('lab').textContent = m;
-  setTimeout(() => $('lab').textContent = key ? 'команда' : 'пароль', 1200);
+  setTimeout(() => $('lab').textContent = key ? 'терминал' : 'пароль', 1200);
 };
 function run() {                             // выполнить команду из строки
   const [word, ...args] = parse(), {pick} = match(word);
@@ -246,8 +247,13 @@ async function login() {
 
 // ---------- События ----------
 $('t').oninput = changed;
-$('t').onclick = e => {                      // запоминаем галочки в списках дел
-  if (e.target.type == 'checkbox') { e.target.toggleAttribute('checked', e.target.checked); changed(); }
+$('t').onclick = e => {
+  const x = e.target;
+  if (x.type == 'checkbox') { x.toggleAttribute('checked', x.checked); changed(); }   // запоминаем галочки в списках дел
+  if (x.className == 'star') {                                                         // ☆: показываем случайный пункт списка выше
+    const box = x.closest('.rnd'), items = [...box.querySelectorAll('li')].map(li => li.textContent.trim()).filter(Boolean);
+    if (items.length) { box.querySelector('span').textContent = items[Math.floor(Math.random() * items.length)]; changed(); }
+  }
 };
 $('t').onkeydown = e => { if (e.key == 'Tab') { e.preventDefault(); $('pw').focus(); } };   // Tab в записи - к командам
 $('page').onclick = e => e.target == $('page') && edit();                                   // клик по пустому месту - писать
