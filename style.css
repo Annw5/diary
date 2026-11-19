@@ -32,3 +32,4 @@ hr    { border: 0; border-top: 1px solid; }
 .rnd ul { margin: 0; padding: 8px 8px 8px 28px; }
 .res  { border-top: 2px solid; padding: 4px 8px; font-weight: bold; }  /* выделенная строка с результатом */
 .star { all: unset; cursor: pointer; font-size: 20px; }                /* кнопка-символ ☆ */
+.cb   { cursor: pointer; font-size: 20px; user-select: none; }       /* квадратик ☐ / ☑ в списке дел */
