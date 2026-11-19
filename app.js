@@ -125,19 +125,17 @@ async function go(i) {                       // перейти к записи i
 }
 
 // ---------- Вставка элементов и команды ----------
-function edit(el) {                          // переносим ввод в запись: в el, иначе где был курсор, иначе в конец
+function edit(el, end) {                          // переносим ввод в запись: в el, иначе где был курсор, иначе в конец
   $('t').focus();
   const sel = getSelection();
-  if (el) return sel.selectAllChildren(el);
-  sel.removeAllRanges();
-  if (rg) sel.addRange(rg); else { sel.selectAllChildren($('t')); sel.collapseToEnd(); }
+  if (el) { sel.selectAllChildren(el); return end && sel.collapseToEnd(); }
 }
 function ins(x) {                            // вставляем HTML-строку или элемент и ставим курсор в первую ячейку/пункт/поле
   const frag = typeof x == 'string' ? document.createRange().createContextualFragment(x) : x;
-  const el = (frag.firstChild || frag).querySelector?.('td,li,.box,h2');
+  const first = frag.firstChild || frag, el = first.matches?.(FIRST) ? first : first.querySelector?.(FIRST);
   if (rg) { rg.collapse(false); rg.insertNode(frag); rg.collapse(false); } else $('t').append(frag);
   changed();
-  edit(el);
+  edit(el, el?.className == 'chk');;
 }
 async function addPhotos(files) {            // фото -> уменьшить -> WebP -> в запись (в тексте остаётся номер data-i)
   for (const f of files) {
@@ -154,6 +152,8 @@ async function addPhotos(files) {            // фото -> уменьшить -
 }
 
 const END = '<div><br></div>';               // пустая строка после элемента, чтобы можно было писать дальше
+const CHK = '<div class="chk"><span contenteditable="false"><input type="checkbox"></span>&nbsp;</div>';  // строка дел: квадратик (его можно нажимать) и текст
+const FIRST = 'td,li,.box,h2,.chk';          // куда ставить курсор после вставки: первая ячейка/пункт/поле/строка дел
 const table = (c, r) => '<table>' + ('<tr>' + '<td>&nbsp;</td>'.repeat(c) + '</tr>').repeat(r) + '</table>' + END;
 function calendar(m, y) {                    // месяц m и год y (если не указаны, текущие)
   const now = new Date(), d = new Date(+y || now.getFullYear(), m ? m - 1 : now.getMonth(), 1);
@@ -173,7 +173,7 @@ const cmds = {
   таблица: (c = 3, r = 3) => ins(table(Math.min(+c, 20), Math.min(+r, 50))),   // таблица [столбцы строки]
   календарь: (m, y) => ins(calendar(m, y)),                                    // календарь [месяц год]
   список: () => ins('<ul><li>&nbsp;</li></ul>'),
-  чек: () => ins('<div><input type="checkbox"> &nbsp;</div>'),
+  чек: () => ins(CHK),
   рандом: () => ins('<div class="rnd"><ul><li>&nbsp;</li></ul><div class="res" contenteditable="false"><button class="star">☆</button> <span></span></div></div>' + END),
   поле: () => ins('<div class="box"><br></div>' + END),
   заголовок: () => ins('<h2>Заголовок</h2>' + END),
@@ -256,7 +256,16 @@ $('t').onclick = e => {
     if (items.length) { box.querySelector('span').textContent = items[Math.floor(Math.random() * items.length)]; changed(); }
   }
 };
-$('t').onkeydown = e => { if (e.key == 'Tab') { e.preventDefault(); $('pw').focus(); } };   // Tab в записи - к командам
+$('t').onbeforeinput = e => {                // Enter в списке дел: новая строка с квадратиком (на пустой строке - выход из списка)
+  const a = getSelection().anchorNode, line = (a?.closest ? a : a?.parentElement)?.closest('.chk');
+  if (e.inputType != 'insertParagraph' || !line) return;
+  e.preventDefault();
+  const empty = !line.textContent.trim();
+  line.insertAdjacentHTML('afterend', empty ? END : CHK);
+  const next = line.nextElementSibling;
+  if (empty) line.remove();
+  changed(); edit(next, !empty);
+};
 $('page').onclick = e => e.target == $('page') && edit();                                   // клик по пустому месту - писать
 $('lock').onsubmit = e => { e.preventDefault(); key ? run() : $('pw').value && login(); };  // Enter (и кнопка "Ввод" на экранной клавиатуре)
 $('lock').onclick = () => $('pw').focus();                                                  // клик по строке - ввод
