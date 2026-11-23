@@ -33,3 +33,10 @@ hr    { border: 0; border-top: 1px solid; }
 .res  { border-top: 2px solid; padding: 4px 8px; font-weight: bold; }  /* выделенная строка с результатом */
 .star { all: unset; cursor: pointer; font-size: 20px; }                /* кнопка-символ ☆ */
 .cb   { cursor: pointer; font-size: 20px; user-select: none; }       /* квадратик ☐ / ☑ в списке дел */
+
+/* ===== Панель оформления текста ===== */
+#bar          { position: fixed; z-index: 8; display: flex; gap: 2px; background: var(--bg); border: 1px solid; padding: 2px; }
+#bar[hidden]  { display: none; }                  /* без этого display:flex перебивает hidden */
+#bar button   { all: unset; cursor: pointer; padding: 4px 10px; font-size: 16px; }
+.b { font-weight: bold; } .i { font-style: italic; }
+.u { text-decoration: underline; } .s { text-decoration: line-through; } .u.s { text-decoration: underline line-through; }
