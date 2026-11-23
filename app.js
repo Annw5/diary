@@ -128,6 +128,45 @@ async function go(i) {                       // перейти к записи i
   else if (cur < idx.length) { cur = idx.length; photos = []; rg = null; $('t').innerHTML = ''; draw(); }
 }
 
+// ---------- Панель оформления текста ----------
+function pick() {                            // текстовые узлы внутри выделения, разрезанные ровно по его границам
+  const r = getSelection().getRangeAt(0);
+  if (r.endContainer.nodeType == 3) r.endContainer.splitText(r.endOffset);           // сначала режем конец (иначе сдвинется начало)
+  if (r.startContainer.nodeType == 3) r.startContainer.splitText(r.startOffset);     // потом начало: хвост от него и есть выделение
+  const root = r.commonAncestorContainer.nodeType == 3 ? r.commonAncestorContainer.parentNode : r.commonAncestorContainer;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {acceptNode: n =>
+    n.length && r.intersectsNode(n) && !n.parentElement.closest('[contenteditable=false]') ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT});
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  return nodes;
+}
+function toggle(cls) {                       // включить/выключить оформление cls у выделения
+  const nodes = pick();
+  if (!nodes.length) return;
+  const on = !nodes[0].parentElement.classList.contains(cls);   // у первого куска нет - включаем всем, есть - выключаем всем
+  for (const n of nodes) {
+    let s = n.parentElement;
+    if (!(s.classList.contains('f') && s.childNodes.length == 1)) {   // уже наш спан с одним куском - используем, иначе оборачиваем
+      s = document.createElement('span'); s.className = 'f';
+      n.replaceWith(s); s.append(n);
+    }
+    s.classList.toggle(cls, on);
+  }
+  const r = getSelection().getRangeAt(0);   // DOM изменился: заново выделяем те же куски
+  r.setStartBefore(nodes[0].parentElement); r.setEndAfter(nodes.at(-1).parentElement);
+  changed();
+}
+function bar() {                             // показать панель над выделением (на касаниях под ним: сверху системное меню)
+  const s = getSelection(), r = s.rangeCount && s.getRangeAt(0), b = $('bar');
+  b.hidden = !(r && !r.collapsed && $('t').contains(r.commonAncestorContainer));
+  if (b.hidden) return;
+  const box = r.getBoundingClientRect();
+  b.style.left = Math.max(4, Math.min(box.left, innerWidth - b.offsetWidth - 4)) + 'px';
+  b.style.top = Math.max(4, matchMedia('(pointer:coarse)').matches ? box.bottom + 8 : box.top - b.offsetHeight - 8) + 'px';
+}
+$('bar').onmousedown = e => e.preventDefault();               // клик по панели не забирает фокус, выделение остаётся
+$('bar').onclick = e => e.target.closest('button') && toggle(e.target.closest('button').dataset.f);
+
 // ---------- Вставка элементов и команды ----------
 function edit(el, end) {                          // переносим ввод в запись: в el, иначе где был курсор, иначе в конец
   $('t').focus();
@@ -323,7 +362,8 @@ document.onkeydown = e => {
   if (e.key == 'Escape') $('pw').focus();                                                      // Esc - в строку команд
   else if (e.altKey && /Arrow[LR]/.test(e.key)) go(cur + (e.key == 'ArrowRight' ? 1 : -1));   // Alt+стрелки - листать записи
 };
-document.addEventListener('selectionchange', () => {                                           // запоминаем курсор в записи
+document.addEventListener('selectionchange', () => {   // запоминаем курсор в записи
+  bar();
   const s = getSelection();
   if (s.rangeCount && $('t').contains(s.anchorNode)) rg = s.getRangeAt(0).cloneRange();
 });
