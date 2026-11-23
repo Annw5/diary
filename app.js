@@ -152,6 +152,16 @@ function wrap(apply) {                       // каждый кусок выде
     }
     return s;
   });
+
+function placeBar() {                        // показать панель над выделением (на касаниях под ним: сверху системное меню)
+  const s = getSelection(), r = s.rangeCount && s.getRangeAt(0), b = $('bar');
+  b.hidden = !(r && !r.collapsed && $('t').contains(r.commonAncestorContainer));   // есть выделение внутри записи?
+  if (b.hidden) return;
+  const box = r.getBoundingClientRect();    // где на экране выделенный текст
+  b.style.left = Math.max(4, Math.min(box.left, innerWidth - b.offsetWidth - 4)) + 'px';   // не уезжаем за края экрана
+  b.style.top = Math.max(4, matchMedia('(pointer:coarse)').matches ? box.bottom + 8 : box.top - b.offsetHeight - 8) + 'px';   // касание: под текстом, мышь: над
+}
+  
   if (!spans.length) return;
   apply(spans);
   rg.setStartBefore(spans[0]); rg.setEndAfter(spans.at(-1));       // DOM изменился: заново выделяем те же куски
@@ -368,7 +378,7 @@ document.onkeydown = e => {
   else if (e.altKey && /Arrow[LR]/.test(e.key)) go(cur + (e.key == 'ArrowRight' ? 1 : -1));   // Alt+стрелки - листать записи
 };
 document.addEventListener('selectionchange', () => {   // запоминаем курсор в записи
-  bar();
+  placeBar();
   const s = getSelection();
   if (s.rangeCount && $('t').contains(s.anchorNode)) rg = s.getRangeAt(0).cloneRange();
 });
