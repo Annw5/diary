@@ -1,6 +1,6 @@
 // Офлайн-режим: файлы сайта лежат в кэше и открываются без интернета, а при наличии сети обновляются в фоне
 // (новая версия сайта появится при следующем заходе). Добавил новый файл сайта - допиши его в список.
-const FILES = ['./', 'index.html', 'style.css', 'app.js', 'fonts/PTSerif-Regular.woff2', 'fonts/Neucha.woff2', 'fonts/unifont.woff2'];
+const FILES = ['./', 'index.html', 'style.css', 'app.js', 'fonts/PTSerif.woff2', 'fonts/Neucha.woff2', 'fonts/unifont.woff2'];
 
 self.addEventListener('install', e => e.waitUntil(caches.open('d').then(c => c.addAll(FILES))));
 self.addEventListener('fetch', e => e.respondWith(caches.open('d').then(async c => {
