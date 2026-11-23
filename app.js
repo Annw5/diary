@@ -142,32 +142,33 @@ function pick() {                            // текстовые узлы вн
   while (walker.nextNode()) nodes.push(walker.currentNode);
   return nodes;
 }
-function wrap(apply) {                       // каждый кусок выделения в span.f, затем apply(список спанов) что-то с ними делает
+
+function wrap(apply) {
   if (!rg || rg.collapsed) return;
   const spans = pick().map(n => {
     let s = n.parentElement;
-    if (!(s.classList.contains('f') && s.childNodes.length == 1)) {   // уже наш спан с одним куском - берём его, иначе оборачиваем
+    if (!(s.classList.contains('f') && s.childNodes.length == 1)) {
       s = document.createElement('span'); s.className = 'f';
       n.replaceWith(s); s.append(n);
     }
     return s;
   });
-
-function placeBar() {                        // показать панель над выделением (на касаниях под ним: сверху системное меню)
-  const s = getSelection(), r = s.rangeCount && s.getRangeAt(0), b = $('bar');
-  b.hidden = !(r && !r.collapsed && $('t').contains(r.commonAncestorContainer));   // есть выделение внутри записи?
-  if (b.hidden) return;
-  const box = r.getBoundingClientRect();    // где на экране выделенный текст
-  b.style.left = Math.max(4, Math.min(box.left, innerWidth - b.offsetWidth - 4)) + 'px';   // не уезжаем за края экрана
-  b.style.top = Math.max(4, matchMedia('(pointer:coarse)').matches ? box.bottom + 8 : box.top - b.offsetHeight - 8) + 'px';   // касание: под текстом, мышь: над
-}
-  
   if (!spans.length) return;
   apply(spans);
-  rg.setStartBefore(spans[0]); rg.setEndAfter(spans.at(-1));       // DOM изменился: заново выделяем те же куски
+  rg.setStartBefore(spans[0]); rg.setEndAfter(spans.at(-1));
   getSelection().removeAllRanges(); getSelection().addRange(rg);
   changed();
 }
+
+function placeBar() {
+  const s = getSelection(), r = s.rangeCount && s.getRangeAt(0), b = $('bar');
+  b.hidden = !(r && !r.collapsed && $('t').contains(r.commonAncestorContainer));
+  if (b.hidden) return;
+  const box = r.getBoundingClientRect();
+  b.style.left = Math.max(4, Math.min(box.left, innerWidth - b.offsetWidth - 4)) + 'px';
+  b.style.top = Math.max(4, matchMedia('(pointer:coarse)').matches ? box.bottom + 8 : box.top - b.offsetHeight - 8) + 'px';
+}
+
 const toggle = cls => wrap(sp => { const on = !sp[0].classList.contains(cls); sp.forEach(s => s.classList.toggle(cls, on)); });
 
 $('fs').innerHTML = '<option value="">px</option>' + [12, 14, 16, 18, 24, 32, 48].map(n => `<option>${n}</option>`).join('');
