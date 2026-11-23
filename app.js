@@ -129,10 +129,12 @@ async function go(i) {                       // перейти к записи i
 }
 
 // ---------- Панель оформления текста ----------
-function pick() {                            // текстовые узлы внутри выделения, разрезанные ровно по его границам
-  const r = getSelection().getRangeAt(0);
-  if (r.endContainer.nodeType == 3) r.endContainer.splitText(r.endOffset);           // сначала режем конец (иначе сдвинется начало)
-  if (r.startContainer.nodeType == 3) r.startContainer.splitText(r.startOffset);     // потом начало: хвост от него и есть выделение
+
+const FONTS = ['ser', 'hand', 'tiny'];       // классы шрифтов по умолчанию
+function pick() {                            // текстовые узлы внутри выделения, разрезанные по его границам
+  const r = rg;                              // запомненное выделение (живое теряется, когда фокус уходит на список)
+  if (r.endContainer.nodeType == 3) r.endContainer.splitText(r.endOffset);
+  if (r.startContainer.nodeType == 3) r.startContainer.splitText(r.startOffset);
   const root = r.commonAncestorContainer.nodeType == 3 ? r.commonAncestorContainer.parentNode : r.commonAncestorContainer;
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {acceptNode: n =>
     n.length && r.intersectsNode(n) && !n.parentElement.closest('[contenteditable=false]') ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT});
@@ -140,32 +142,35 @@ function pick() {                            // текстовые узлы вн
   while (walker.nextNode()) nodes.push(walker.currentNode);
   return nodes;
 }
-function toggle(cls) {                       // включить/выключить оформление cls у выделения
-  const nodes = pick();
-  if (!nodes.length) return;
-  const on = !nodes[0].parentElement.classList.contains(cls);   // у первого куска нет - включаем всем, есть - выключаем всем
-  for (const n of nodes) {
+function wrap(apply) {                       // каждый кусок выделения в span.f, затем apply(список спанов) что-то с ними делает
+  if (!rg || rg.collapsed) return;
+  const spans = pick().map(n => {
     let s = n.parentElement;
-    if (!(s.classList.contains('f') && s.childNodes.length == 1)) {   // уже наш спан с одним куском - используем, иначе оборачиваем
+    if (!(s.classList.contains('f') && s.childNodes.length == 1)) {   // уже наш спан с одним куском - берём его, иначе оборачиваем
       s = document.createElement('span'); s.className = 'f';
       n.replaceWith(s); s.append(n);
     }
-    s.classList.toggle(cls, on);
-  }
-  const r = getSelection().getRangeAt(0);   // DOM изменился: заново выделяем те же куски
-  r.setStartBefore(nodes[0].parentElement); r.setEndAfter(nodes.at(-1).parentElement);
+    return s;
+  });
+  if (!spans.length) return;
+  apply(spans);
+  rg.setStartBefore(spans[0]); rg.setEndAfter(spans.at(-1));       // DOM изменился: заново выделяем те же куски
+  getSelection().removeAllRanges(); getSelection().addRange(rg);
   changed();
 }
-function bar() {                             // показать панель над выделением (на касаниях под ним: сверху системное меню)
-  const s = getSelection(), r = s.rangeCount && s.getRangeAt(0), b = $('bar');
-  b.hidden = !(r && !r.collapsed && $('t').contains(r.commonAncestorContainer));
-  if (b.hidden) return;
-  const box = r.getBoundingClientRect();
-  b.style.left = Math.max(4, Math.min(box.left, innerWidth - b.offsetWidth - 4)) + 'px';
-  b.style.top = Math.max(4, matchMedia('(pointer:coarse)').matches ? box.bottom + 8 : box.top - b.offsetHeight - 8) + 'px';
-}
-$('bar').onmousedown = e => e.preventDefault();               // клик по панели не забирает фокус, выделение остаётся
+const toggle = cls => wrap(sp => { const on = !sp[0].classList.contains(cls); sp.forEach(s => s.classList.toggle(cls, on)); });
+
+$('fs').innerHTML = '<option value="">px</option>' + [12, 14, 16, 18, 24, 32, 48].map(n => `<option>${n}</option>`).join('');
+$('bar').onmousedown = e => e.target.closest('button') && e.preventDefault();   // кнопки не забирают фокус; списки должны открываться, им нельзя
 $('bar').onclick = e => e.target.closest('button') && toggle(e.target.closest('button').dataset.f);
+$('fs').onchange = e => {
+  const v = e.target.value; e.target.value = '';                                // сразу возвращаем список к заголовку
+  if (v) wrap(sp => sp.forEach(s => s.style.fontSize = v + 'px'));
+};
+$('ff').onchange = e => {
+  const v = e.target.value; e.target.value = '';
+  if (v) wrap(sp => sp.forEach(s => { s.classList.remove(...FONTS); s.classList.add(v); }));
+};
 
 // ---------- Вставка элементов и команды ----------
 function edit(el, end) {                          // переносим ввод в запись: в el, иначе где был курсор, иначе в конец
