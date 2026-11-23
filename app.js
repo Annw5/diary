@@ -3,6 +3,8 @@
 const $ = id => document.getElementById(id), enc = new TextEncoder(), dec = new TextDecoder();
 const u32 = n => new Uint8Array(new Uint32Array([n]).buffer);   // число -> 4 байта
 const MAXSIDE = 2048;     // фото крупнее уменьшаем до такой стороны: файл меньше, слабым телефонам легче
+const MAIN = 'diary3.bin', IMP = 'import.bin';   // основной файл дневника и файл, который принесла команда «импорт»
+const fileName = () => sessionStorage.file || localStorage.file || MAIN;   // какой файл открывать: только сейчас, каждый раз, по умолчанию
 
 // ---------- Переменные ----------
 let off = false, stops = [];   // off: оформление отключено командой «стоп»; stops: функции «убрать за собой» от скриптов
@@ -31,15 +33,18 @@ async function write(parts) {                // записываем файл ц
   await w.close();
   file = await handle.getFile();
 }
-async function scan() {                      // идём по меткам и запоминаем записи (сами не читаем)
-  idx = []; memo = {};
-  for (let pos = 16; pos < file.size;) {
-    const head = new Uint8Array(await file.slice(pos, pos + 5).arrayBuffer());   // метка + флаг
+
+async function walk(f) {                     // идём по меткам файла f и собираем записи (сами не читаем); ok - файл похож на дневник
+  const list = []; let pos = 16;
+  while (pos + 5 <= f.size) {
+    const head = new Uint8Array(await f.slice(pos, pos + 5).arrayBuffer());   // метка + флаг
     const n = new DataView(head.buffer).getUint32(0, true);
-    idx.push({s: pos + 4, n, f: head[4]});
+    list.push({s: pos + 4, n, f: head[4]});
     pos += 4 + n;
   }
+  return {list, ok: pos == f.size};
 }
+
 async function readEntry(i) {                // расшифровываем запись i -> {h: содержимое, c: код, p: фото}
   const {s, n} = idx[i];
   const b = new Uint8Array(await file.slice(s + 1, s + n).arrayBuffer());        // s+1: пропускаем флаг
@@ -110,6 +115,7 @@ async function saveNow() {
   await saveEntry({h: box.innerHTML, c: getCode(t.innerText)});
 }
 const save = () => queue = queue.catch(() => {}).then(saveNow);   // сохранения идут строго по очереди
+const flush = async () => { clearTimeout(timer); if (dirty) save(); await queue; };   // дописать всё несохранённое и дождаться файла
 function changed() {                         // любая правка: через 2 секунды тишины обновим оформление и сохраним
   dirty = true;
   clearTimeout(timer);
@@ -117,9 +123,7 @@ function changed() {                         // любая правка: чер�
 }
 async function go(i) {                       // перейти к записи i (дальше последней - новая пустая)
   if (!key || i < 0) return;
-  clearTimeout(timer);
-  if (dirty) save();
-  await queue;                               // ждём, пока допишется файл
+  await flush();
   if (i < idx.length) await show(i);
   else if (cur < idx.length) { cur = idx.length; photos = []; rg = null; $('t').innerHTML = ''; draw(); }
 }
@@ -166,6 +170,33 @@ function calendar(m, y) {                    // месяц m и год y (есл
   const week = 'Пн Вт Ср Чт Пт Сб Вс'.split(' ').map(td).join('');
   return `<table><tr><td colspan=7>${d.toLocaleString('ru', {month: 'long', year: 'numeric'})}</td></tr><tr>${week}</tr>${rows}</table>` + END;
 }
+
+// Экспорт и импорт: файл дневника переносится между устройствами как есть (он зашифрован, пароль остаётся прежним)
+async function exportFile() {                // скачать текущий файл дневника
+  await flush();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(file);
+  a.download = 'diary-' + new Date().toISOString().slice(0, 10) + '.bin';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+}
+function importFile() {                      // выбрать файл дневника, положить рядом со старым и спросить, открывать ли его каждый раз
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.onchange = async () => {
+    const f = input.files[0];
+    if (!f) return;
+    await flush();                           // сначала дописываем открытый дневник
+    if (!(await walk(f)).ok) return flash('это не дневник');
+    const w = await (await (await navigator.storage.getDirectory()).getFileHandle(IMP, {create: true})).createWritable();
+    await w.write(f); await w.close();       // копия лежит отдельно, старое сохранение не трогаем
+    const always = confirm('Открывать этот файл каждый раз?\nОК - да, он станет основным (вернуться к старому: команда «старое»).\nОтмена - открыть один раз, потом снова старое сохранение.');
+    if (always) localStorage.file = IMP; else sessionStorage.file = IMP;
+    location.reload();                       // заново к вводу пароля: нужен пароль импортированного файла
+  };
+  input.click();
+}
+
 // Команды. Чтобы добавить новую, допиши строку: слово: () => что сделать.
 // Порядок важен: при вводе первых букв Enter выполнит первую подходящую команду.
 const cmds = {
@@ -180,6 +211,9 @@ const cmds = {
   линия: () => ins('<hr>'),
   дата: () => ins(new Date().toLocaleDateString('ru')),
   тема: () => $('th').click(),
+    экспорт: exportFile,
+  импорт: importFile,
+  старое: async () => { await flush(); delete localStorage.file; delete sessionStorage.file; location.reload(); },   // вернуться к старому сохранению
   новая: () => go(idx.length),
   назад: () => go(cur - 1),
   вперёд: () => go(cur + 1),
@@ -190,7 +224,7 @@ const cmds = {
 
 // ---------- Строка ввода: пароль, потом команды ----------
 const HELP = 'Команды: ' + Object.keys(cmds).join(' · ') + '. Enter - выполнить первую подсказку, ↑↓ - история команд, ' +
-     'Tab - писать в запись (в записи Tab или Esc - обратно), Alt+←/→ - листать записи. Параметры: таблица [столбцы строки], календарь [месяц год]. ' + 'Рандом: пиши пункты списка, кнопка ☆ выберет случайный. Стоп - отключить оформление, запуск - включить его и запустить скрипты. Хелп - спрятать или вернуть эту подсказку.';
+     'Tab - писать в запись (в записи Tab или Esc - обратно), Alt+←/→ - листать записи. Параметры: таблица [столбцы строки], календарь [месяц год]. ' +   'Экспорт - скачать файл дневника, импорт - открыть другой файл дневника (с его паролем), старое - вернуться к старому сохранению. ' + 'Рандом: пиши пункты списка, кнопка ☆ выберет случайный. Стоп - отключить оформление, запуск - включить его и запустить скрипты. Хелп - спрятать или вернуть эту подсказку.';
 const parse = () => $('pw').value.trim().toLowerCase().split(/\s+/);   // ['слово', 'число', ...]
 function match(word) {                       // подходящие команды и та, что выполнится
   const list = Object.keys(cmds).filter(n => word && n.startsWith(word));
@@ -208,10 +242,13 @@ function setLine(v = '') {                   // заменить текст в �
   $('pw').setSelectionRange(v.length, v.length);
   sync();
 }
-const flash = m => {                         // сообщение вместо слова "команда"/"пароль" на секунду
+
+const lbl = () => key ? 'терминал' : fileName() == MAIN ? 'пароль' : 'пароль импорта';   // подпись строки ввода
+const flash = m => {                         // сообщение вместо подписи на секунду
   $('lab').textContent = m;
-  setTimeout(() => $('lab').textContent = key ? 'терминал' : 'пароль', 1200);
+  setTimeout(() => $('lab').textContent = lbl(), 1200);
 };
+
 function run() {                             // выполнить команду из строки
   const [word, ...args] = parse(), {pick} = match(word);
   setLine();
@@ -226,15 +263,15 @@ async function login() {
   if (busy) return;                          // повторный Enter во время входа игнорируем (на слабых телефонах вход долгий)
   busy = true; $('lab').textContent = 'проверка...';
   try {
-    handle = await (await navigator.storage.getDirectory()).getFileHandle('diary3.bin', {create: true});
+    handle = await (await navigator.storage.getDirectory()).getFileHandle(fileName(), {create: true});
     file = await handle.getFile();
     if (file.size) salt = new Uint8Array(await file.slice(0, 16).arrayBuffer());   // старый дневник: читаем соль
     else await write([salt = crypto.getRandomValues(new Uint8Array(16))]);          // новый: создаём соль
     key = await makeKey($('pw').value, salt);
-    await scan();
+    idx = (await walk(file)).list; memo = {};
     idx.length ? await show(idx.length - 1) : draw();                               // открываем последнюю запись
   } catch (e) {
-    key = null; busy = false; setLine(); $('lab').textContent = 'пароль';
+    key = null; busy = false; setLine(); $('lab').textContent = lbl();
     if (e.name != 'OperationError') throw e; // OperationError = не расшифровалось, то есть пароль неверный
     return flash('неверно');
   }
@@ -302,4 +339,5 @@ document.ontouchend = e => {
 
 navigator.storage?.persist();                    // просим браузер не удалять данные сам
 navigator.serviceWorker?.register('sw.js');      // офлайн-режим
+$('lab').textContent = lbl();
 sync();
