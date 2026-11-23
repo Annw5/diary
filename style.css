@@ -48,3 +48,12 @@ hr    { border: 0; border-top: 1px solid; }
 .ser  { font-family: 'PT Serif', Unifont, serif; }              /* обычный */
 .hand { font-family: Neucha, 'PT Serif', Unifont, cursive; }    /* рукописный */
 .tiny { font-family: Unifont, monospace; }                      /* компактный */
+
+/* ===== Режим листа A4 (команда «лист») ===== */
+:root { --gap: color-mix(in srgb, var(--fg) 15%, var(--bg)); }       /* цвет зазора между листами */
+body.sheet #page { padding: 16px 8px 40px; overflow-x: hidden; }     /* на листе боковые поля страницы узкие */
+#t.sheet { --h: 297mm; --p: calc(297mm + 16px);                      /* высота листа и шаг между листами: те же числа, что в JS */
+  position: relative; box-sizing: border-box; width: 210mm; min-height: 0; margin: 0 auto;
+  background: linear-gradient(var(--bg) var(--h), var(--gap) 0) 0 0 / 100% var(--p);   /* лист, зазор, лист, зазор... */
+  outline: 1px solid var(--gap); }
+.pg { user-select: none; }                                           /* прокладка, которую ставит раскладка */
