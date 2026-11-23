@@ -7,6 +7,7 @@ const MAIN = 'diary3.bin', IMP = 'import.bin';   // основной файл д
 const fileName = () => sessionStorage.file || localStorage.file || MAIN;   // какой файл открывать: только сейчас, каждый раз, по умолчанию
 
 // ---------- Переменные ----------
+let sheet = null, lay = 0;   // sheet: отступы открытой записи ("1/5/2,2/7/1"), null = не в режиме листа; lay: номер последней раскладки
 let off = false, stops = [];   // off: оформление отключено командой «стоп»; stops: функции «убрать за собой» от скриптов
 let key, salt, handle, file;                 // ключ шифрования, "соль", файл diary3.bin (дескриптор и содержимое)
 let idx = [], memo = {};                     // записи {s: начало, n: длина, f: есть код оформления}; запомненный код записей
@@ -42,7 +43,7 @@ async function walk(f) {                     // идём по меткам фа�
     list.push({s: pos + 4, n, f: head[4]});
     pos += 4 + n;
   }
-  return {list, ok: pos == f.size};
+  return {h: meta.h, c: meta.c, l: meta.l, p: meta.p.map(...)};
 }
 
 async function readEntry(i) {                // расшифровываем запись i -> {h: содержимое, c: код, p: фото}
@@ -99,9 +100,11 @@ function draw() {
 async function show(i) {
   const e = await readEntry(i);
   urls.forEach(URL.revokeObjectURL);         // освобождаем память от фото прошлой записи
-  cur = i; photos = e.p; rg = null; $('t').innerHTML = e.h;
+  cur = i; photos = e.p; rg = null; sheet = e.l || null; $('t').innerHTML = e.h;      // в show
   urls = [...$('t').querySelectorAll('img[data-i]')].map(im => im.src = URL.createObjectURL(photos[im.dataset.i])); // возвращаем фото на места
+
   draw();
+  layout();
 }
 async function saveNow() {
   const t = $('t');
@@ -111,21 +114,21 @@ async function saveNow() {
   photos = imgs.map(im => photos[im.dataset.i]);   // оставляем только фото, которые ещё есть в записи
   imgs.forEach((im, k) => im.dataset.i = k);       // и нумеруем заново
   const box = t.cloneNode(true);
-  box.querySelectorAll('img').forEach(im => im.removeAttribute('src'));   // ссылки на фото не храним: фото лежат отдельно
-  await saveEntry({h: box.innerHTML, c: getCode(t.innerText)});
+  box.querySelectorAll('.pg').forEach(e => e.remove());                   // прокладки листа не храним: их пересчитает раскладка
+  await saveEntry({h: box.innerHTML, c: getCode(t.innerText), l: sheet});
 }
 const save = () => queue = queue.catch(() => {}).then(saveNow);   // сохранения идут строго по очереди
 const flush = async () => { clearTimeout(timer); if (dirty) save(); await queue; };   // дописать всё несохранённое и дождаться файла
 function changed() {                         // любая правка: через 2 секунды тишины обновим оформление и сохраним
   dirty = true;
   clearTimeout(timer);
-  timer = setTimeout(() => { deco(); save(); }, 2000);
+  timer = setTimeout(() => { deco(); layout(); save(); }, 2000);
 }
 async function go(i) {                       // перейти к записи i (дальше последней - новая пустая)
   if (!key || i < 0) return;
   await flush();
   if (i < idx.length) await show(i);
-  else if (cur < idx.length) { cur = idx.length; photos = []; rg = null; $('t').innerHTML = ''; draw(); }
+  else if (cur < idx.length) { cur = idx.length; photos = []; rg = null; sheet = null; $('t').innerHTML = ''; draw(); }   // в go
 }
 
 // ---------- Панель оформления текста ----------
@@ -182,6 +185,52 @@ $('ff').onchange = e => {
   const v = e.target.value; e.target.value = '';
   if (v) wrap(sp => sp.forEach(s => { s.classList.remove(...FONTS); s.classList.add(v); }));
 };
+
+// ---------- Лист A4 ----------
+const MM = 96 / 25.4, GAP = 16;              // пикселей в одном мм (так считает CSS); зазор между листами на экране
+function margins(str) {                      // "1/5/2,2/7/1" -> поля в мм {l, r, t, b}; null, если записано неверно
+  const g = str.split(',').map(p => p.split('/').map(Number));   // [[1,5,2],[2,7,1]]
+  if (g.length != 2 || g.some(p => p.length != 3 || p.some(n => !(n >= 0)) || !(p[1] > 0))) return null;   // две тройки, числа не отрицательные, середина больше 0
+  const [x, y] = g, kx = 210 / (x[0] + x[1] + x[2]), ky = 297 / (y[0] + y[1] + y[2]);   // сколько мм в одной доле
+  return {l: x[0] * kx, r: x[2] * kx, t: y[0] * ky, b: y[2] * ky};
+}
+function wrapLoose(t) {                      // россыпь (текст, фото, span прямо в записи) -> в div, чтобы у каждой строки была "коробка"
+  const s = getSelection(), keep = t.contains(s.anchorNode) && [s.anchorNode, s.anchorOffset, s.focusNode, s.focusOffset];   // запоминаем курсор
+  let run = null;                            // div, куда складываем подряд идущие россыпные куски
+  for (const n of [...t.childNodes]) {
+    if (n.nodeType == 1 && !getComputedStyle(n).display.startsWith('inline')) { run = null; continue; }   // это уже блок: оставляем
+    if (!run) t.insertBefore(run = document.createElement('div'), n);
+    run.append(n);
+  }
+  if (keep && keep[0] != t) s.setBaseAndExtent(...keep);   // переезд узлов сбросил курсор: возвращаем на место
+}
+async function layout() {                    // расставить блоки записи по листам
+  const t = $('t'), m = sheet && margins(sheet), id = ++lay;   // id: если раскладка запустится снова, эта прекратится
+  t.querySelectorAll('.pg').forEach(e => e.remove());          // старые прокладки убираем: считаем с нуля
+  t.classList.toggle('sheet', !!m); document.body.classList.toggle('sheet', !!m);
+  if (!m) return t.removeAttribute('style');                   // не лист: убираем всё, что насчитали
+  const H = 297 * MM, P = H + GAP, mt = m.t * MM, mb = m.b * MM;   // высота листа, шаг между листами, верхнее и нижнее поля в px
+  t.style.padding = `0 ${m.r}mm 0 ${m.l}mm`;                  // левое и правое поля
+  await Promise.all([document.fonts.ready, ...[...t.querySelectorAll('img')].map(i => i.decode().catch(() => {}))]);   // ждём шрифты и фото: от них зависят высоты
+  if (id != lay) return;
+  wrapLoose(t);
+  for (const el of [...t.children]) {                          // копия списка: прокладки, которые вставим, в обход не попадут
+    const y = el.offsetTop, ht = el.offsetHeight, k = Math.floor(y / P);   // где блок и на каком он листе
+    const start = k * P + mt, end = k * P + H - mb;            // где на этом листе начинается и кончается текст
+    const to = y < start ? start : y + ht > end && y > start + 20 ? start + P : 0;   // куда сдвинуть блок: на начало текста / на следующий лист / не двигать
+    if (!to) continue;                                         // y > start + 20: блок, который сам начинает лист и всё равно не влезает, оставляем
+    const sp = document.createElement('div');
+    sp.className = 'pg'; sp.contentEditable = false;
+    sp.style.height = to - y + 'px';
+    t.insertBefore(sp, el);
+    sp.style.height = to - y + (to - el.offsetTop) + 'px';     // подгон: поля соседних блоков могли сложиться иначе
+  }
+  const last = t.lastElementChild, pages = Math.max(1, Math.floor(((last ? last.offsetTop + last.offsetHeight : 0) - 1) / P) + 1);
+  t.style.minHeight = pages * P - GAP + 'px';                  // последний лист дорисовываем целиком
+  const fit = Math.min(1, (document.documentElement.clientWidth - 16) / t.offsetWidth);   // узкий экран: лист уменьшаем по ширине
+  t.style.transform = `scale(${fit})`; t.style.transformOrigin = '0 0';
+  t.style.marginBottom = -(1 - fit) * t.offsetHeight + 'px';   // убираем пустоту под уменьшенным листом
+}
 
 // ---------- Вставка элементов и команды ----------
 function edit(el, end) {                          // переносим ввод в запись: в el, иначе где был курсор, иначе в конец
@@ -264,9 +313,14 @@ const cmds = {
   поле: () => ins('<div class="box"><br></div>' + END),
   заголовок: () => ins('<h2>Заголовок</h2>' + END),
   линия: () => ins('<hr>'),
+    лист: m => {                                                 // лист [отступы]: без отступов включает или выключает режим
+    if (m && !margins(m)) return flash('вид: 1/5/2,2/7/1');
+    sheet = m || (sheet ? null : '1/8/1,1/8/1');
+    changed(); layout();
+  },
   дата: () => ins(new Date().toLocaleDateString('ru')),
   тема: () => $('th').click(),
-    экспорт: exportFile,
+  экспорт: exportFile,
   импорт: importFile,
   старое: async () => { await flush(); delete localStorage.file; delete sessionStorage.file; location.reload(); },   // вернуться к старому сохранению
   новая: () => go(idx.length),
