@@ -40,7 +40,7 @@ hr    { border: 0; border-top: 1px solid; }
 #bar button   { all: unset; cursor: pointer; padding: 4px 10px; font-size: 16px; }
 .b { font-weight: bold; } .i { font-style: italic; }
 .u { text-decoration: underline; } .s { text-decoration: line-through; } .u.s { text-decoration: underline line-through; }
-font-family: 'PT Serif', 'Neucha', ' Unifont', serif;
+font-family: 'PTSerif', 'Neucha', ' Unifont', serif;
 
 /* ===== Шрифты (файлы лежат в fonts/) ===== */
 @font-face { font-family: 'PT Serif'; src: url(fonts/PTSerif-Regular.woff2); font-display: swap; }
