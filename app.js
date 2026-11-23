@@ -137,7 +137,7 @@ function pick() {                            // текстовые узлы вн
   if (r.startContainer.nodeType == 3) r.startContainer.splitText(r.startOffset);
   const root = r.commonAncestorContainer.nodeType == 3 ? r.commonAncestorContainer.parentNode : r.commonAncestorContainer;
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {acceptNode: n =>
-    n.length && r.intersectsNode(n) && !n.parentElement.closest('[contenteditable=false]') ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT});
+    n.length && r.comparePoint(n, 0) == 0 && !n.parentElement.closest('[contenteditable=false]') ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT});
   const nodes = [];
   while (walker.nextNode()) nodes.push(walker.currentNode);
   return nodes;
